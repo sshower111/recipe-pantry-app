@@ -34,8 +34,9 @@ based on available pantry items. Everything runs locally: no cloud APIs.
 
 ```
 config.py        Settings dataclass from RECIPE_* env vars / .env (see .env.example)
-main.py          argparse CLI: init-db | ingest | batch | search | pantry | list | show
-pipeline/        downloader, transcriber, parser, ingest, urls, ocr
+main.py          argparse CLI: init-db | ingest | batch | search | pantry | list | show | import-page |
+                 renormalize
+pipeline/        downloader, transcriber, parser, ingest, urls, ocr, webrecipe
 db/              schema, normalize, repository, pantry
 tests/           pytest suite (no network, Ollama, or Whisper model needed)
 data/            gitignored: recipes.db and temporary downloads
@@ -51,20 +52,27 @@ python main.py ingest <url> [<url> ...] [--skip-existing]
 python main.py batch --file urls.txt [--refresh]
 python main.py search --ingredients "garlic, butter, pasta" --max-missing 3 [--json]
 python main.py pantry chicken garlic "soy sauce" --max-missing 3 [--json] [--no-staples]
-python main.py list
+python main.py list [--todo | --all]   # default: ready recipes only
 python main.py show <id> [--json]
+python main.py import-page <id> [--url <recipe page>]   # ingredients from the creator's blog
+python main.py renormalize [--dry-run]   # after normalizer/ALIASES edits
 ```
 
 ## Design Rules & Conventions
 
 - **Same normalization on both sides.** Recipe ingredients and pantry queries both go through
   `db/normalize.py::normalize_ingredient_name`. Matching relies on consistency, not perfect
-  linguistics. Add synonyms to `ALIASES` there; add tests in `tests/test_normalize.py`.
+  linguistics. Add synonyms to `ALIASES` there; add tests in `tests/test_normalize.py`; then run
+  `main.py renormalize` so stored rows pick up the change. Accents on Latin letters are folded
+  (`purée` -> `puree`); letters in other scripts are kept, never stripped.
 - **Keep the raw text.** `recipe_ingredients.raw_name` stores the original wording; `ingredients.name`
   is the canonical shared name. The same ingredient may appear twice in one recipe.
 - **Record where ingredients came from.** `recipes.ingredient_sources` lists the inputs the parser
   read them from (`description`, `speech`, `captions`, `title`; `comments` and `on_screen` are
   reserved for future inputs). `transcript_source` only says which transcript was sent to the model.
+- **English output.** The prompt requires title, yield and ingredient names in English whatever
+  the video's language (verified on Spanish, Japanese and Cantonese text with qwen3.5:9b);
+  the original-language text stays in `description` / `transcript`.
 - **One ingredient list per recipe, with its yield.** `recipes.yield_label` records what the amounts
   make ("serves 4", "1 standard loaf pan"). When a post gives several batch sizes, the parser keeps
   only the standard/smallest home-size one, never a mix (user's choice: no multi-version storage).
@@ -89,11 +97,29 @@ python main.py show <id> [--json]
   then re-parsed. The retry is kept only if it has at least as many ingredients. OCR failures
   are logged and never fail an ingest. Raw text goes in `recipes.on_screen_text`. Lazy-import
   EasyOCR (inside `pipeline/ocr.py::_reader`), like faster-whisper.
+- **Recipe pages** (`RECIPE_RECIPE_PAGES`, default on). When a parse looks incomplete and the
+  caption links to a non-social page (`urls.recipe_link`), `webrecipe.fetch_recipe_page` reads its
+  schema.org Recipe JSON-LD and the model re-parses with a RECIPE PAGE section. This runs before
+  OCR (cheaper, exact). Failures (home-page-only link, HTTP 403 bot blocking, no recipe data) are
+  logged and skipped; never try to get around a site's bot blocking. Page URL/text are stored in
+  `recipe_page_url` / `recipe_page_text`. `import-page` applies it to stored recipes from their
+  saved text (no re-download), or with `--url` for "link in bio" posts.
 - **Transcript choice:** use platform captions if ≥ 40 chars and `RECIPE_PREFER_CAPTIONS`, else
   Whisper. The video description is always included in the prompt (reels often put the recipe there).
 - **Silent reels:** Instagram serves a video-only file when a reel has no audio; faster-whisper
   crashes on it ("tuple index out of range"), so `transcriber.has_audio` is checked first and
   Whisper is skipped. EasyOCR's per-frame PyTorch CPU warnings are filtered in `ocr._quiet_torch`.
+- **Posts without an ingredient list** (recipe on a blog, "link in bio", comment-a-keyword DMs,
+  or not a recipe) are still saved: the row acts as a cache so `batch` skips them next time
+  instead of re-downloading/OCR-ing. `recipes.status` is `ready` (has ingredients),
+  `needs_recipe` (caption points elsewhere; `status_note` records failures such as a site's 403),
+  or `not_recipe` (user confirmed these are non-recipe videos: food vlogs, ads, restaurant
+  visits). `save_recipe` forces `ready` when there are lines and leaves NULL when not told;
+  `main.open_db` backfills NULLs via `urls.classify_missing_recipe`. `list` shows only ready,
+  `list --todo` the needs_recipe to-do list, `list --all` everything. Empty posts have no
+  `ingredient_sources`. `list`/`show`/`ingest` label them; `pipeline/urls.py::recipe_link` and
+  `points_elsewhere` find the caption's external recipe link or hint (`show` also prints
+  "Full recipe:" for normal recipes). Pantry search never returns them (no ingredient rows).
 - **Caption failures** (e.g. YouTube 429) trigger a retry without captions rather than failing.
 - **Pantry staples** (`RECIPE_PANTRY_STAPLES`: salt, black pepper, water, oil) are excluded from
   scoring entirely, not counted as matched.
@@ -117,4 +143,4 @@ python main.py show <id> [--json]
 - OCR verified on a synthetic text-only video (all lines read, parsed correctly) and on the real
   Instagram reel (`RECIPE_OCR=always`: 60 frames, ~4.5 min total vs ~1.5 min without). Not yet
   tested on a real reel whose ingredients appear only on screen.
-- The project is not a git repository yet.
+- Public on GitHub: https://github.com/sshower111/recipe-pantry-app (MIT).

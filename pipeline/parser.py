@@ -36,7 +36,7 @@ class Ingredient(BaseModel):
 class ParsedRecipe(BaseModel):
     title: str
     # Which prompt sections the ingredient list was read from.
-    sources: list[Literal["title", "description", "transcript", "on_screen"]]
+    sources: list[Literal["title", "description", "transcript", "on_screen", "recipe_page"]]
     # What the ingredient amounts make, e.g. "serves 4" or "1 standard loaf pan".
     yield_label: str | None
     ingredients: list[Ingredient]
@@ -77,16 +77,23 @@ def parse_quantity(text: str) -> float | None:
 
 SYSTEM_PROMPT = """\
 You extract recipes from cooking video text (title, caption/description, spoken transcript,
-and sometimes text read from the video frames).
+and sometimes text read from the video frames or the creator's recipe web page).
 
 Return JSON with:
 - "title": a short descriptive recipe name (not clickbait; e.g. "Garlic Butter Shrimp Pasta").
 - "sources": which input sections the ingredient list was taken from: any of "title",
-  "description", "transcript", "on_screen". Only list a section if ingredients or amounts came
-  from it.
+  "description", "transcript", "on_screen", "recipe_page". Only list a section if ingredients or
+  amounts came from it.
 - "yield_label": what the ingredient amounts make, in the text's wording ("serves 4",
   "12 cookies", "1 standard loaf pan"), or null if it is not stated.
 - "ingredients": every ingredient used, each as {"name", "amount", "unit"}.
+
+Language: the video may be in any language (Spanish, Cantonese, Japanese, French, ...) and
+the sections may mix languages. ALWAYS write "title", "yield_label" and every ingredient
+"name" in standard English, translating as needed ("蒜頭" / "ajo" -> "garlic",
+"グラニュー糖" -> "granulated sugar", "15個分" -> "15 rolls"). Use the common English
+name a supermarket would use; for ingredients with no English equivalent, use the usual
+romanized name ("gochujang", "mirin", "pandan leaf"). Never output non-English text.
 
 If the text gives the same recipe at several batch sizes (e.g. "1x - 1 loaf pan" and
 "3x - 2 loaf pans"), use ONLY the standard or smallest home-size batch: take its amounts and
@@ -97,25 +104,36 @@ Rules for ingredients:
   ("2 cloves garlic, minced" -> "garlic"; "3 large eggs" -> "egg"; "chopped fresh cilantro" -> "cilantro").
   Keep words that change what the ingredient is ("brown sugar", "soy sauce", "ground beef").
 - "amount": a number (convert fractions: "1/2" -> 0.5) or null if not stated.
-- "unit": a short unit ("tbsp", "tsp", "cup", "g", "ml", "oz", "lb", "clove", "can", "pinch")
-  or null for countable items ("2 eggs") or when unstated.
+- "unit": a short English unit ("tbsp", "tsp", "cup", "g", "ml", "oz", "lb", "clove", "can",
+  "pinch"; "大さじ" -> "tbsp", "cucharadita" -> "tsp") or null for countable items ("2 eggs")
+  or when unstated.
 - List each ingredient once; if quantities are split across steps, add them up when the units match.
 - Only include ingredients that are actually mentioned. Do not invent quantities.
 - Ignore equipment, sponsorships, and calls to action.
 - ON-SCREEN TEXT comes from OCR of the video frames: lines may be out of order, repeated, or
   misspelled ("sov sauce" -> "soy sauce"). Correct obvious OCR errors, and ignore usernames,
   watermarks, and captions that are not ingredients.
+- RECIPE PAGE is the full written recipe from the creator's website. When present it is the
+  most reliable source: take the ingredient list, amounts and yield from it. Where it gives
+  both cups and grams ("½ cup (113g) butter"), use the grams. Ignore footnote marks ("*").
 - If the text contains no recipe, return empty "sources" and "ingredients" lists.
 """
 
 
 def build_messages(
-    *, title: str, description: str, transcript: str, on_screen: str = "", max_chars: int = 12000
+    *,
+    title: str,
+    description: str,
+    transcript: str,
+    on_screen: str = "",
+    recipe_page: str = "",
+    max_chars: int = 12000,
 ) -> list[dict[str, str]]:
     """Build the chat messages for Ollama, truncating the transcript to fit context."""
     description = description.strip()[: max_chars // 3]
     on_screen = on_screen.strip()[: max_chars // 3]
-    budget = max(max_chars - len(description) - len(on_screen), 0)
+    recipe_page = recipe_page.strip()[: max_chars // 3]
+    budget = max(max_chars - len(description) - len(on_screen) - len(recipe_page), 0)
     transcript = transcript.strip()
     if len(transcript) > budget:
         transcript = transcript[:budget] + " [...]"
@@ -126,6 +144,8 @@ def build_messages(
     )
     if on_screen:
         user += f"\n\nON-SCREEN TEXT (OCR of video frames):\n{on_screen}"
+    if recipe_page:
+        user += f"\n\nRECIPE PAGE (from the creator's website):\n{recipe_page}"
     return [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user}]
 
 
@@ -170,6 +190,7 @@ def parse_recipe(
     description: str,
     transcript: str,
     on_screen: str = "",
+    recipe_page: str = "",
     model: str = "qwen2.5:7b",
     base_url: str = "http://localhost:11434",
     timeout: float = 180,
@@ -181,7 +202,7 @@ def parse_recipe(
     """Ask the model for a structured recipe, retrying if the output fails validation."""
     messages = build_messages(
         title=title, description=description, transcript=transcript, on_screen=on_screen,
-        max_chars=max_chars,
+        recipe_page=recipe_page, max_chars=max_chars,
     )
     payload = build_payload(messages, model=model, num_ctx=num_ctx, think=think)
 

@@ -93,3 +93,15 @@ def test_parse_recipe_missing_model(monkeypatch):
     monkeypatch.setattr(parser.requests, "post", lambda *a, **k: FakeResponse("", status_code=404))
     with pytest.raises(OllamaError, match="ollama pull"):
         parse_recipe(title="t", description="", transcript="x")
+
+
+def test_system_prompt_requires_english_output():
+    prompt = parser.SYSTEM_PROMPT
+    assert "ALWAYS write \"title\", \"yield_label\" and every ingredient\n\"name\" in standard English" in prompt
+    assert '"ajo" -> "garlic"' in prompt
+
+
+def test_build_messages_recipe_page_section():
+    user = build_messages(title="T", description="d", transcript="t", recipe_page="- 2 eggs")[1]["content"]
+    assert user.endswith("RECIPE PAGE (from the creator's website):\n- 2 eggs")
+    assert "RECIPE PAGE" not in build_messages(title="T", description="d", transcript="t")[1]["content"]

@@ -71,3 +71,47 @@ def read_url_file(lines: Iterable[str]) -> tuple[list[str], int]:
         elif text.strip():
             ignored += 1
     return urls, ignored
+
+
+# Captions often point to the recipe instead of including it. A bare domain only counts with
+# a common web TLD, so "ep.9" or "@hellotoa.official" don't match.
+_SITE = re.compile(
+    r"(?<![\w@./-])(?:[a-z0-9-]+\.)+(?:com|net|org|co|io|blog|me|ca|uk|au|nz|kitchen|recipes|food)"
+    r"(?:/[^\s<>\"'()\[\]{}]*)?(?![\w.-])",
+    re.IGNORECASE,
+)
+_SOCIAL_HOSTS = ("instagram.com", "instagr.am", "tiktok.com", "youtube.com", "youtu.be", "linktr.ee")
+_ELSEWHERE = re.compile(
+    r"link in (?:my )?bio|on (?:my|the) (?:\w+ )?(?:blog|website|site)|recipe (?:is )?(?:at|on) (?:my|the)"
+    r"|comment\s+[\"'‘“]?\w+[\"'’”]?\s+(?:and|&|for|to)",
+    re.IGNORECASE,
+)
+
+
+def recipe_link(text: str) -> str | None:
+    """The first non-social web link in a caption (likely the full recipe), if any."""
+    for match in _URL.finditer(text):
+        url = match.group(0).rstrip(_TRAILING)
+        if not _is_social(url):
+            return url if "://" in url else f"https://{url}"
+    for match in _SITE.finditer(text):
+        url = match.group(0).rstrip(_TRAILING)
+        if not _is_social(url):
+            return f"https://{url}"
+    return None
+
+
+def points_elsewhere(text: str) -> bool:
+    """True if a caption says the recipe is somewhere else (blog, link in bio, comment-for-DM)."""
+    return bool(_ELSEWHERE.search(text)) or recipe_link(text) is not None
+
+
+def _is_social(url: str) -> bool:
+    host = (urlsplit(url if "://" in url else f"https://{url}").hostname or "").lower()
+    return any(host == h or host.endswith("." + h) for h in _SOCIAL_HOSTS)
+
+
+def classify_missing_recipe(description: str | None) -> str:
+    """Status for a post with no ingredient list: ``needs_recipe`` when the caption points to
+    the recipe somewhere else, otherwise ``not_recipe`` (food vlogs, ads, technique clips)."""
+    return "needs_recipe" if points_elsewhere(description or "") else "not_recipe"

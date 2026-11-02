@@ -1,6 +1,6 @@
 import pytest
 
-from pipeline.urls import canonical_url, read_url_file
+from pipeline.urls import canonical_url, points_elsewhere, read_url_file, recipe_link
 
 
 @pytest.mark.parametrize(
@@ -57,3 +57,32 @@ def test_read_url_file_ignores_other_text():
         "https://instagram.com/reel/X2/?igsh=zz",
         "https://www.youtube.com/shorts/bbbbbbbbbbb",
     ], 3)
+
+
+@pytest.mark.parametrize(
+    ("caption", "link", "elsewhere"),
+    [
+        # Shapes of real captions from saved reels.
+        ("The recipe is at the link in my bio. Full link here: https://scientificallysweet.com/best-brownies/ "
+         "Brownie Tips: 1. Never use raising agents", "https://scientificallysweet.com/best-brownies/", True),
+        ("the full recipe is up on my blog at wellmadebykiley.com OR you can comment 'BANANA' to get it",
+         "https://wellmadebykiley.com", True),
+        ("Recipe on my website OR Comment SPAIN and I will send it to you", None, True),
+        ("recipe on okonomikitchen blog or comment 'recipe' & I'll send you the link!", None, True),
+        ("Full recipe is on my blog, link in my bio!! #lemoncookies", None, True),
+        ("coconut matcha cloud with @hellotoa.official Simple + Addition Coconut Water #ad", None, False),
+        ("ep.9 what the focc series, 1.5 cups flour", None, False),
+        ("follow me on instagram.com/chef and youtube.com/@chef", None, False),
+    ],
+)
+def test_recipe_link_and_points_elsewhere(caption, link, elsewhere):
+    assert recipe_link(caption) == link
+    assert points_elsewhere(caption) is elsewhere
+
+
+def test_classify_missing_recipe():
+    from pipeline.urls import classify_missing_recipe
+
+    assert classify_missing_recipe("Full recipe is on my blog, link in my bio!!") == "needs_recipe"
+    assert classify_missing_recipe("📍Patois 794 Dundas St W, Toronto #torontofood") == "not_recipe"
+    assert classify_missing_recipe(None) == "not_recipe"

@@ -1,10 +1,21 @@
 from db.normalize import normalize_ingredient_name, normalize_unit
 from db.pantry import PantryMatch, find_recipes_by_pantry
-from db.repository import find_recipe_id, get_recipe, list_recipes, save_recipe
+from db.repository import (
+    backfill_status,
+    count_by_status,
+    find_recipe_id,
+    get_recipe,
+    list_recipes,
+    renormalize_ingredients,
+    save_recipe,
+    set_status_note,
+)
 from db.schema import connect, init_db
 
 __all__ = [
     "PantryMatch",
+    "backfill_status",
+    "count_by_status",
     "connect",
     "find_recipe_id",
     "find_recipes_by_pantry",
@@ -13,5 +24,7 @@ __all__ = [
     "list_recipes",
     "normalize_ingredient_name",
     "normalize_unit",
+    "renormalize_ingredients",
     "save_recipe",
+    "set_status_note",
 ]

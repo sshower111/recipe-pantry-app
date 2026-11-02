@@ -133,3 +133,65 @@ def test_connect_migrates_old_database(tmp_path):
     assert [i["name"] for i in recipe["ingredients"]] == ["bread"]
     assert [m.title for m in find_recipes_by_pantry(conn, ["bread"])] == ["Old Toast"]
     conn.close()
+
+
+def test_renormalize_repoints_changed_names(conn, monkeypatch):
+    from db import normalize, repository
+
+    # Simulate a row stored by an older normalizer.
+    rid = save_recipe(conn, source_url="https://example.com/pumpkin", title="Pumpkin Balls",
+                      ingredients=[ing("pumpkin purée"), ing("glutinous rice flour")])
+    conn.execute("UPDATE ingredients SET name = 'pumpkin pur e' WHERE name = 'pumpkin puree'")
+    conn.commit()
+
+    assert repository.renormalize_ingredients(conn, dry_run=True) == [
+        ("pumpkin purée", "pumpkin pur e", "pumpkin puree")
+    ]
+    assert conn.execute("SELECT COUNT(*) FROM ingredients WHERE name = 'pumpkin pur e'").fetchone()[0] == 1
+
+    # An alias added later applies to existing rows too.
+    monkeypatch.setitem(normalize.ALIASES, "glutinous rice flour", "sweet rice flour")
+    changes = repository.renormalize_ingredients(conn)
+    assert [c[2] for c in changes] == ["sweet rice flour", "pumpkin puree"]
+    names = [i["name"] for i in get_recipe(conn, rid)["ingredients"]]
+    assert names == ["pumpkin puree", "sweet rice flour"]
+    # old ingredient rows are gone
+    assert conn.execute(
+        "SELECT COUNT(*) FROM ingredients WHERE name IN ('pumpkin pur e', 'glutinous rice flour')"
+    ).fetchone()[0] == 0
+    assert repository.renormalize_ingredients(conn) == []
+
+
+def test_status_ready_or_left_for_backfill(conn):
+    from db import backfill_status, count_by_status
+
+    assert {r["status"] for r in list_recipes(conn)} == {"ready"}
+    empty = save_recipe(conn, source_url="https://example.com/e", title="Vlog", ingredients=[], description="vlog")
+    linked = save_recipe(conn, source_url="https://example.com/l", title="Cake", ingredients=[],
+                         status="needs_recipe", status_note="blocked")
+    assert get_recipe(conn, empty)["status"] is None
+    assert get_recipe(conn, linked)["status_note"] == "blocked"
+
+    seen = []
+    assert backfill_status(conn, lambda d: seen.append(d) or "not_recipe") == 1
+    assert seen == ["vlog"]
+    assert count_by_status(conn) == {"ready": 3, "not_recipe": 1, "needs_recipe": 1}
+    assert [r["title"] for r in list_recipes(conn, ["needs_recipe"])] == ["Cake"]
+
+    # Getting ingredients later makes it ready and clears the note.
+    save_recipe(conn, source_url="https://example.com/l", title="Cake", ingredients=[ing("flour")],
+                status="needs_recipe", status_note="blocked")
+    assert (get_recipe(conn, linked)["status"], get_recipe(conn, linked)["status_note"]) == ("ready", None)
+
+
+def test_backfill_marks_old_rows_with_ingredients_ready(tmp_path):
+    path = tmp_path / "old.db"
+    conn = connect(path)
+    save_recipe(conn, source_url="https://example.com/x", title="X", ingredients=[ing("egg")])
+    conn.execute("UPDATE recipes SET status = NULL")
+    conn.commit()
+    from db import backfill_status
+
+    assert backfill_status(conn, lambda d: "not_recipe") == 1
+    assert get_recipe(conn, 1)["status"] == "ready"
+    assert backfill_status(conn, lambda d: "not_recipe") == 0

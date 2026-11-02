@@ -75,6 +75,9 @@ class Settings:
     ocr_fps: float
     ocr_max_frames: int
 
+    # Fetch the recipe page a caption links to when the video's own text is incomplete.
+    recipe_pages: bool
+
     pantry_staples: tuple[str, ...]
 
 
@@ -101,6 +104,7 @@ def load_settings() -> Settings:
         ocr_gpu=_env_bool("OCR_GPU", False),
         ocr_fps=float(_env("OCR_FPS", "1")),
         ocr_max_frames=int(_env("OCR_MAX_FRAMES", "60")),
+        recipe_pages=_env_bool("RECIPE_PAGES", True),
         pantry_staples=_env_list("PANTRY_STAPLES", "salt,black pepper,water,oil"),
     )
 

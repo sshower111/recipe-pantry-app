@@ -29,6 +29,13 @@ from db.normalize import normalize_ingredient_name, normalize_unit
         ("3 overripe bananas", "banana"),
         ("Ap flour", "flour"),
         ("Flaky sea salt", "salt"),
+        ("pumpkin purée", "pumpkin puree"),
+        ("Crème fraîche", "creme fraiche"),
+        ("jalapeños", "jalapeno"),
+        ("２ cloves garlic", "garlic"),  # full-width digit
+        ("蒜頭", "蒜頭"),  # untranslated names stay visible
+        ("グラニュー糖", "グラニュー糖"),  # kana voicing marks kept
+        ("soy_sauce!", "soy sauce"),
         ("fresh", ""),
     ],
 )

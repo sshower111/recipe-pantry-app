@@ -7,6 +7,7 @@ so matching only needs to be consistent, not linguistically perfect.
 from __future__ import annotations
 
 import re
+import unicodedata
 
 # Words that describe preparation/size rather than identity ("2 large eggs, beaten" -> "egg").
 _DESCRIPTORS = {
@@ -81,7 +82,9 @@ _LEADING_UNITS = set(_UNITS) | {
 
 _LEADING_QUANTITY = re.compile(r"^[\d\s/.,½¼¾⅓⅔⅛-]+")
 _PARENS = re.compile(r"\([^)]*\)")
-_NON_WORD = re.compile(r"[^a-z0-9\s]")
+# Punctuation and symbols; letters in any script survive, so an untranslated name
+# ("蒜頭") stays visible instead of being erased.
+_NON_WORD = re.compile(r"[^\w\s]|_")
 _SPACES = re.compile(r"\s+")
 
 
@@ -101,9 +104,22 @@ def _singularize(word: str) -> str:
     return word
 
 
+def _fold_text(text: str) -> str:
+    """NFKC (full-width "２００ｇ" -> "200g"), then strip accents from Latin letters only
+    ("purée" -> "puree"). Other scripts are left alone: decomposing Japanese kana would
+    drop their voicing marks."""
+    text = unicodedata.normalize("NFKC", text)
+    out = []
+    for char in text:
+        if "À" <= char <= "ɏ":
+            char = "".join(c for c in unicodedata.normalize("NFKD", char) if not unicodedata.combining(c))
+        out.append(char)
+    return "".join(out)
+
+
 def normalize_ingredient_name(raw: str) -> str:
     """Return a canonical lowercase singular name, or "" if nothing meaningful remains."""
-    name = raw.lower().strip()
+    name = _fold_text(raw).lower().strip()
     name = _PARENS.sub(" ", name)
     name = name.split(",", 1)[0]  # "garlic, minced" -> "garlic"
     name = name.replace("-", " ")

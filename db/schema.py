@@ -17,6 +17,14 @@ CREATE TABLE IF NOT EXISTS recipes (
     transcript_source TEXT CHECK (transcript_source IN ('captions', 'whisper', 'none')),
     -- Distinct text lines OCR'd from video frames (NULL when OCR didn't run).
     on_screen_text    TEXT,
+    -- The creator's recipe web page, when ingredients were imported from it.
+    recipe_page_url   TEXT,
+    recipe_page_text  TEXT,
+    -- ready: has ingredients. needs_recipe: the recipe is elsewhere (blog, bio link, DM, or a
+    -- site that blocks downloads). not_recipe: not a cooking recipe. Rows are kept either way
+    -- so batch runs skip posts already looked at.
+    status            TEXT CHECK (status IN ('ready', 'needs_recipe', 'not_recipe')),
+    status_note       TEXT,
     -- Comma-separated inputs the ingredients came from: description, speech, captions,
     -- comments, on_screen, title.
     ingredient_sources TEXT,
@@ -55,6 +63,10 @@ _ADDED_COLUMNS = [
     ("recipes", "ingredient_sources", "TEXT"),
     ("recipes", "yield_label", "TEXT"),
     ("recipes", "on_screen_text", "TEXT"),
+    ("recipes", "recipe_page_url", "TEXT"),
+    ("recipes", "recipe_page_text", "TEXT"),
+    ("recipes", "status", "TEXT CHECK (status IN ('ready', 'needs_recipe', 'not_recipe'))"),
+    ("recipes", "status_note", "TEXT"),
 ]
 
 

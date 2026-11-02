@@ -4,7 +4,7 @@
     python main.py batch --file urls.txt [--refresh]
     python main.py search --ingredients "garlic, butter, pasta" --max-missing 3
     python main.py pantry chicken garlic "soy sauce" --max-missing 3
-    python main.py list
+    python main.py list [--todo | --all]
     python main.py show <recipe_id>
 """
 
@@ -18,7 +18,27 @@ from dataclasses import asdict
 from pathlib import Path
 
 from config import settings
-from db import PantryMatch, connect, find_recipes_by_pantry, get_recipe, list_recipes
+from db import (
+    PantryMatch,
+    backfill_status,
+    connect,
+    count_by_status,
+    find_recipes_by_pantry,
+    get_recipe,
+    list_recipes,
+    renormalize_ingredients,
+)
+
+STATUS_LABELS = {"ready": "ready", "needs_recipe": "needs a recipe", "not_recipe": "not a recipe"}
+
+
+def open_db():
+    """Connect to the database, filling in ``status`` for rows saved before it existed."""
+    from pipeline.urls import classify_missing_recipe
+
+    conn = connect(settings.db_path)
+    backfill_status(conn, classify_missing_recipe)
+    return conn
 
 
 def cmd_init_db(args: argparse.Namespace) -> int:
@@ -32,8 +52,9 @@ def ingest_many(urls: list[str], *, skip_existing: bool) -> int:
     from pipeline.ingest import ingest_url
     from pipeline.urls import canonical_url
 
-    conn = connect(settings.db_path)
+    conn = open_db()
     counts = {"added": 0, "updated": 0, "skipped": 0, "failed": 0}
+    without_list = {"needs_recipe": 0, "not_recipe": 0}
     seen: set[str] = set()
     for url in urls:
         key = canonical_url(url)
@@ -54,15 +75,43 @@ def ingest_many(urls: list[str], *, skip_existing: bool) -> int:
             print(f"SKIP   [{result.recipe_id}] {result.source_url}: already stored")
             continue
         recipe = result.recipe
+        if not recipe.ingredients:
+            without_list[result.recipe_status or "needs_recipe"] += 1
+            print(f"{result.status.upper():<6} [{result.recipe_id}] {result.title or recipe.title} "
+                  f"({describe_missing_list(result.description, result.status_note)})")
+            continue
         makes = f", makes {recipe.yield_label}" if recipe.yield_label else ""
         print(
-            f"{result.status.upper():<6} [{result.recipe_id}] {recipe.title} "
+            f"{result.status.upper():<6} [{result.recipe_id}] {result.title or recipe.title} "
             f"({len(recipe.ingredients)} ingredients{makes}; "
             f"{describe_sources(result.ingredient_sources or [], result.transcript_source)})"
         )
     if len(urls) > 1:
-        print(", ".join(f"{n} {status}" for status, n in counts.items()))
+        summary = ", ".join(f"{n} {status}" for status, n in counts.items())
+        extra = ", ".join(f"{n} {STATUS_LABELS[k]}" for k, n in without_list.items() if n)
+        print(summary + (f" (of the saved: {extra}; see `list --todo`)" if extra else ""))
     return 1 if counts["failed"] else 0
+
+
+def sentence(text: str) -> str:
+    """Uppercase the first letter only (str.capitalize() would turn "DM" into "dm")."""
+    return text[:1].upper() + text[1:]
+
+
+def describe_missing_list(description: str | None, note: str | None = None) -> str:
+    """Why a saved post has no ingredients, for `ingest`, `show` and `list --todo` output.
+    ``note`` is a recorded failure, e.g. the recipe site blocking downloads."""
+    from pipeline.urls import points_elsewhere, recipe_link
+
+    description = description or ""
+    link = recipe_link(description)
+    if link:
+        text = f"no ingredient list in the post; recipe at {link}"
+    elif points_elsewhere(description):
+        text = "no ingredient list in the post; the caption says the recipe is on a blog, in the bio, or by DM"
+    else:
+        text = "not a recipe: no ingredient list and nothing pointing to one"
+    return f"{text} [{note}]" if note else text
 
 
 def cmd_ingest(args: argparse.Namespace) -> int:
@@ -100,7 +149,7 @@ def run_pantry_query(ingredients: list[str], args: argparse.Namespace) -> int:
         print("Give at least one ingredient.", file=sys.stderr)
         return 2
     matches = find_recipes_by_pantry(
-        connect(settings.db_path),
+        open_db(),
         ingredients,
         ignore_ingredients=() if args.no_staples else settings.pantry_staples,
         max_missing=args.max_missing,
@@ -134,23 +183,87 @@ def cmd_search(args: argparse.Namespace) -> int:
 
 
 def cmd_list(args: argparse.Namespace) -> int:
-    for r in list_recipes(connect(settings.db_path)):
-        makes = f", makes {r['yield_label']}" if r["yield_label"] else ""
-        print(f"[{r['id']}] {r['title']}  ({r['ingredient_count']} ingredients{makes})  {r['source_url']}")
+    """Ready recipes by default; `--todo` lists posts whose recipe still has to be found,
+    `--all` everything with its status."""
+    conn = open_db()
+    if args.todo:
+        rows = list_recipes(conn, ["needs_recipe"])
+        if not rows:
+            print("Nothing to do: no saved posts are waiting for a recipe.")
+            return 0
+        for r in rows:
+            by = f" by {r['uploader']}" if r["uploader"] else ""
+            print(f"[{r['id']}] {r['title']}{by}")
+            print(f"      {describe_missing_list(r['description'], r['status_note'])}")
+            print(f"      {r['source_url']}")
+        print("\nAdd a recipe page with: python main.py import-page <id> --url <recipe page>")
+        return 0
+
+    for r in list_recipes(conn, None if args.all else ["ready"]):
+        if r["ingredient_count"]:
+            makes = f", makes {r['yield_label']}" if r["yield_label"] else ""
+            detail = f"{r['ingredient_count']} ingredients{makes}"
+        else:
+            detail = STATUS_LABELS.get(r["status"], "no ingredient list")
+        print(f"[{r['id']}] {r['title']}  ({detail})  {r['source_url']}")
+    if not args.all:
+        counts = count_by_status(conn)
+        hidden = [f"{counts[k]} {STATUS_LABELS[k]}" for k in ("needs_recipe", "not_recipe") if counts.get(k)]
+        if hidden:
+            print(f"\n(hidden: {', '.join(hidden)}; see `list --todo` or `list --all`)")
+    return 0
+
+
+def cmd_import_page(args: argparse.Namespace) -> int:
+    from pipeline.ingest import import_recipe_page
+    from pipeline.webrecipe import RecipePageError
+
+    try:
+        result = import_recipe_page(open_db(), args.recipe_id, url=args.url)
+    except (ValueError, RecipePageError) as exc:
+        print(f"FAILED {exc}", file=sys.stderr)
+        return 1
+    recipe = result.recipe
+    makes = f", makes {recipe.yield_label}" if recipe.yield_label else ""
+    print(
+        f"UPDATED [{result.recipe_id}] {result.title or recipe.title} ({len(recipe.ingredients)} ingredients{makes}; "
+        f"{describe_sources(result.ingredient_sources or [], result.transcript_source)})"
+    )
+    return 0
+
+
+def cmd_renormalize(args: argparse.Namespace) -> int:
+    changes = renormalize_ingredients(open_db(), dry_run=args.dry_run)
+    if not changes:
+        print("All ingredient names are already up to date.")
+        return 0
+    for raw_name, old, new in changes:
+        print(f"  {raw_name!r}: {old} -> {new}")
+    verb = "Would update" if args.dry_run else "Updated"
+    print(f"{verb} {len(changes)} ingredient name{'s' * (len(changes) != 1)}.")
     return 0
 
 
 def cmd_show(args: argparse.Namespace) -> int:
-    recipe = get_recipe(connect(settings.db_path), args.recipe_id)
+    recipe = get_recipe(open_db(), args.recipe_id)
     if recipe is None:
         print(f"No recipe with id {args.recipe_id}", file=sys.stderr)
         return 1
     if args.json:
         print(json.dumps(recipe, indent=2, default=str))
         return 0
+    from pipeline.urls import recipe_link
+
     print(recipe["title"])
     print(recipe["source_url"])
-    print(describe_sources(recipe["ingredient_sources"], recipe["transcript_source"]).capitalize())
+    link = recipe["recipe_page_url"] or recipe_link(recipe["description"] or "")
+    if not recipe["ingredients"]:
+        print(f"Status: {STATUS_LABELS.get(recipe['status'], recipe['status'])}")
+        print(sentence(describe_missing_list(recipe["description"], recipe["status_note"])))
+        return 0
+    if link:
+        print(f"Full recipe: {link}")
+    print(sentence(describe_sources(recipe["ingredient_sources"], recipe["transcript_source"])))
     print(f"Makes: {recipe['yield_label'] or 'not stated'}\n")
     for ing in recipe["ingredients"]:
         amount = f"{ing['amount']:g} " if ing["amount"] is not None else ""
@@ -197,7 +310,23 @@ def build_parser() -> argparse.ArgumentParser:
     add_query_options(p)
     p.set_defaults(func=cmd_search)
 
-    sub.add_parser("list", help="list stored recipes").set_defaults(func=cmd_list)
+    p = sub.add_parser("list", help="list recipes ready to cook (see --todo, --all)")
+    which = p.add_mutually_exclusive_group()
+    which.add_argument("--todo", action="store_true",
+                       help="posts whose recipe is elsewhere (blog, bio link, DM) and still needs a link")
+    which.add_argument("--all", action="store_true", help="everything saved, including non-recipe posts")
+    p.set_defaults(func=cmd_list)
+
+    p = sub.add_parser("import-page",
+                       help="read a stored recipe's ingredients from its recipe web page")
+    p.add_argument("recipe_id", type=int)
+    p.add_argument("--url", help="the recipe page (default: the link in the post's caption)")
+    p.set_defaults(func=cmd_import_page)
+
+    p = sub.add_parser("renormalize",
+                       help="recompute stored ingredient names after normalizer/alias changes")
+    p.add_argument("--dry-run", action="store_true", help="show the changes without saving them")
+    p.set_defaults(func=cmd_renormalize)
 
     p = sub.add_parser("show", help="show one recipe")
     p.add_argument("recipe_id", type=int)

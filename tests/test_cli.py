@@ -137,3 +137,90 @@ def test_batch_missing_or_empty_file(db_path, tmp_path, capsys):
     empty.write_text("# nothing yet\n", encoding="utf-8")
     assert main.main(["batch", "--file", str(empty)]) == 1
     assert "No URLs found" in capsys.readouterr().err
+
+
+@pytest.fixture
+def db_with_empty(db_path):
+    conn = connect(db_path)
+    save_recipe(conn, source_url="https://example.com/cake", title="Basque Cheesecake", ingredients=[],
+                description="Recipe on my website OR Comment SPAIN and I will send it to you")
+    save_recipe(conn, source_url="https://example.com/brownie", title="Brownies", ingredients=[],
+                description="Full link here: https://scientificallysweet.com/brownies/")
+    save_recipe(conn, source_url="https://example.com/ad", title="Coconut Drink", ingredients=[],
+                description="#ad with @brand.official")
+    save_recipe(conn, source_url="https://example.com/cookies", title="Cookies",
+                ingredients=[{"name": "flour"}], description="recipe: https://blog.example.com/cookies")
+    conn.close()
+    return db_path
+
+
+def test_list_shows_ready_recipes_and_counts_hidden(db_with_empty, capsys):
+    main.main(["list"])
+    out = capsys.readouterr().out
+    assert "[6] Cookies  (1 ingredients)" in out
+    assert "Basque Cheesecake" not in out and "Coconut Drink" not in out
+    assert "(hidden: 2 needs a recipe, 1 not a recipe; see `list --todo` or `list --all`)" in out
+
+
+def test_list_todo_shows_posts_needing_a_recipe(db_with_empty, capsys):
+    main.main(["list", "--todo"])
+    lines = capsys.readouterr().out.splitlines()
+    assert "[4] Brownies" in lines and "[3] Basque Cheesecake" in lines
+    assert "      no ingredient list in the post; recipe at https://scientificallysweet.com/brownies/" in lines
+    assert not any("Coconut Drink" in line or "Cookies" in line for line in lines)
+    assert lines[-1] == "Add a recipe page with: python main.py import-page <id> --url <recipe page>"
+
+
+def test_list_all_includes_every_status(db_with_empty, capsys):
+    main.main(["list", "--all"])
+    out = capsys.readouterr().out
+    assert "[5] Coconut Drink  (not a recipe)" in out
+    assert "[3] Basque Cheesecake  (needs a recipe)" in out
+    assert "hidden" not in out
+
+
+@pytest.mark.parametrize(
+    ("recipe_id", "status", "expected"),
+    [
+        (3, "needs a recipe",
+         "No ingredient list in the post; the caption says the recipe is on a blog, in the bio, or by DM"),
+        (4, "needs a recipe", "No ingredient list in the post; recipe at https://scientificallysweet.com/brownies/"),
+        (5, "not a recipe", "Not a recipe: no ingredient list and nothing pointing to one"),
+    ],
+)
+def test_show_explains_missing_list(db_with_empty, capsys, recipe_id, status, expected):
+    main.main(["show", str(recipe_id)])
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[2:4] == [f"Status: {status}", expected]
+
+
+def test_show_includes_recorded_failure(db_with_empty, capsys):
+    from db import set_status_note
+
+    conn = connect(db_with_empty)
+    set_status_note(conn, 4, "scientificallysweet.com blocks automated requests (HTTP 403)")
+    conn.close()
+    main.main(["show", "4"])
+    assert capsys.readouterr().out.splitlines()[3].endswith(
+        "[scientificallysweet.com blocks automated requests (HTTP 403)]")
+
+
+def test_show_prints_full_recipe_link(db_with_empty, capsys):
+    main.main(["show", "6"])
+    assert "Full recipe: https://blog.example.com/cookies" in capsys.readouterr().out
+
+
+def test_batch_reports_posts_without_ingredients(db_path, monkeypatch, tmp_path, capsys):
+    def fake(url, conn, *, skip_existing):
+        parsed = ParsedRecipe(title="Cheesecake", sources=[], yield_label=None, ingredients=[])
+        return IngestResult(recipe_id=9, source_url=url, status="added", recipe=parsed,
+                            transcript_source="whisper", ingredient_sources=[],
+                            description="comment 'CAKE' and I'll send it")
+
+    monkeypatch.setattr(ingest, "ingest_url", fake)
+    url_file = tmp_path / "urls.txt"
+    url_file.write_text("https://example.com/a\nhttps://example.com/b\n", encoding="utf-8")
+    main.main(["batch", "-f", str(url_file)])
+    out = capsys.readouterr().out
+    assert "ADDED  [9] Cheesecake (no ingredient list in the post; the caption says" in out
+    assert "2 added, 0 updated, 0 skipped, 0 failed (of the saved: 2 needs a recipe; see `list --todo`)" in out
