@@ -136,3 +136,7 @@ pytest
 The tests cover normalization, the DB and pantry query, prompt and response
 handling (with Ollama mocked), and caption parsing. They don't need network access,
 Ollama, or a Whisper model.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
