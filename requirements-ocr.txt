@@ -1,0 +1,3 @@
+-r requirements.txt
+# Optional: on-screen text OCR (pulls in CPU PyTorch, a few hundred MB)
+easyocr>=1.7
