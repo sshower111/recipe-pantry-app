@@ -18,6 +18,51 @@ URL ──yt-dlp──► metadata + captions + audio
                      pantry list ──► recipes ranked by fewest missing ingredients
 ```
 
+## Demo
+
+Real output from my own database of about 90 recipes saved from Instagram reels.
+
+**What can I cook with what's in the fridge?**
+
+```
+$ python main.py pantry pork shrimp egg "green onion" "soy sauce" "oyster sauce" garlic --max-missing 3
+1. [65] Steamed Pork Patty with Egg  (5/6 ingredients, missing 1)
+     have:    egg, green onion, oyster sauce, pork, soy sauce
+     missing: cornstarch water
+     https://www.instagram.com/p/Dd0PyCxBqds/
+
+2. [106] Maxie's Wonton Noodle Soup  (2/5 ingredients, missing 3)
+     have:    pork, shrimp
+     missing: duck egg noodle, pork fat, yellow chive
+     https://www.instagram.com/p/DRa-0aEjEgM/
+```
+
+**A stored recipe, parsed from the reel's caption and speech:**
+
+```
+$ python main.py show 55
+Salted Maple Banana Bread
+https://www.instagram.com/p/DZva78zpQuq/
+Ingredients from description, speech; transcript: whisper
+Makes: 1 standard loaf pan
+
+  - 0.75 cup butter
+  - 1 cup brown sugar
+  - 0.33 cup white sugar
+  - 1.33 cup mashed banana
+  - 2 egg
+  - 1.5 tsp vanilla paste
+  - 1 tsp molasses
+  - 2 cup all-purpose flour
+  - 1 tsp baking soda
+  - 1 tsp salt
+  - 4 oz buttermilk
+  - 0.5 cup maple syrup
+  - flaky sea salt
+```
+
+Salt, pepper, water and oil count as pantry staples, so they never show up as missing.
+
 ## Layout
 
 ```
@@ -80,8 +125,13 @@ This needs the CUDA 12 cuBLAS and cuDNN 9 libraries; see the faster-whisper READ
 ```bash
 python main.py ingest "https://www.youtube.com/shorts/<id>" "https://www.instagram.com/reel/<id>/"
 python main.py batch --file urls.txt            # add --refresh to re-parse stored URLs
-python main.py list
+python main.py list                            # recipes ready to cook
+python main.py list --todo                     # posts whose recipe is on a blog / in the bio / by DM
+python main.py list --all                      # everything, including non-recipe videos
 python main.py show 1
+python main.py import-page 34                  # read a post's ingredients from its linked blog recipe
+python main.py import-page 63 --url https://...   # ... or from a recipe page you found yourself
+python main.py renormalize --dry-run          # re-apply name normalization to stored recipes
 python main.py search --ingredients "chicken, garlic, soy sauce, rice, eggs" --max-missing 3
 python main.py pantry eggs butter --json        # same query, space-separated
 ```
