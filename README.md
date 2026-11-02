@@ -15,31 +15,32 @@ URL ──yt-dlp──► metadata + captions + audio
                                                    │                        └─► re-parse
                          normalize names/units ──► SQLite
                                                    │
-                     pantry list ──► recipes ranked by fewest missing ingredients
+           selected ingredients ──► recipes using the most of them, fewest extras first
 ```
 
 ## Demo
 
 Real output from my own database of about 90 recipes saved from Instagram reels.
 
-**What can I cook with what's in the fridge?**
+**What can I cook with what's in the fridge?** Recipes that use the most of the selected
+ingredients come first; ties go to the one needing the fewest other ingredients.
 
 ```
-$ python main.py pantry flour sugar "brown sugar" honey yeast eggs "baking soda" --max-missing 1
-1. [84] Classic Japanese Bagel  (4/4 ingredients, can make now)
-     have:    flour, honey, sugar, yeast
-     missing: -
-     instagram.com/p/CzJiZmOLfaW
+$ python main.py pantry flour sugar "brown sugar" honey yeast eggs "baking soda" --limit 3
+1. [54] Bakery Style Chocolate Chip Cookies  (uses 5 of 7 selected; +4 more)
+     uses:       baking soda, egg, flour, honey, sugar
+     also needs: butter, dark brown sugar, dark chocolate, pure vanilla extract
+     instagram.com/p/DWZPP4xD2FE
 
-2. [37] No-Yeast Youtiao  (3/4 ingredients, missing 1)
-     have:    baking soda, flour, sugar
-     missing: baking powder
-     instagram.com/p/C188sW2PfKU
+2. [29] Black Sesame Swirl Banana Bread  (uses 5 of 7 selected; +6 more)
+     uses:       baking soda, brown sugar, egg, flour, sugar
+     also needs: banana, black sesame paste, buttermilk, ground cinnamon, olive oil, vanilla bean paste
+     instagram.com/p/DU05oN_DkAN
 
-3. [33] Honey Butter Toast  (2/3 ingredients, missing 1)
-     have:    brown sugar, honey
-     missing: butter
-     instagram.com/p/C63hOr1ysaW
+3. [1] Salted Maple Banana Bread  (uses 5 of 7 selected; +6 more)
+     uses:       baking soda, brown sugar, egg, flour, sugar
+     also needs: banana, butter, buttermilk, maple syrup, molasses, vanilla paste
+     instagram.com/p/DZlOp2nJL4I
 ```
 
 **A stored recipe, parsed from the reel's caption and speech:**
@@ -87,11 +88,15 @@ pipeline/
   parser.py            prompt + Ollama call with JSON-schema output, pydantic validation
   ingest.py            orchestrates the above and saves the result
   urls.py              canonical URLs (share-link variants -> one key), batch file reading
+  thumbnails.py        saves each video's thumbnail under data/thumbnails/
+api/app.py             FastAPI JSON server for the web app
+web/                   Next.js + Tailwind + Framer Motion app (cookbook, recipe, cooking mode)
 db/
   schema.py            recipes / ingredients / recipe_ingredients + connect()
   normalize.py         canonical ingredient names and units
   repository.py        save_recipe (upsert by URL), get_recipe, list_recipes
   pantry.py            find_recipes_by_pantry
+  step_ingredients.py  which ingredient lines each step mentions
 tests/
 ```
 
@@ -143,8 +148,13 @@ python main.py list --all                      # everything, including non-recip
 python main.py show 1
 python main.py import-page 34                  # read a post's ingredients from its linked blog recipe
 python main.py import-page 63 --url https://...   # ... or from a recipe page you found yourself
+python main.py import-page 39 --file "Lemon Curd Cookies.html"   # site blocks the app: save the page (Ctrl+S)
+python main.py import-page 45 --file ingredients.txt               # ... or paste the ingredient list
+python main.py reparse 12 15                   # run the model again on saved recipes (no download)
+python main.py reparse --missing-steps         # add steps to recipes saved before steps existed (~2 min each)
 python main.py renormalize --dry-run          # re-apply name normalization to stored recipes
-python main.py search --ingredients "chicken, garlic, soy sauce, rice, eggs" --max-missing 3
+python main.py thumbnails                      # save missing video thumbnails (for the web app)
+python main.py search --ingredients "chicken, garlic, soy sauce, rice, eggs" --limit 10
 python main.py pantry eggs butter --json        # same query, space-separated
 ```
 
@@ -157,8 +167,10 @@ used (`http(s)://...` or bare `instagram.com/...`-style links), and text after a
 comment, so `# https://...` skips that link. The run reports how many lines had no URL.
 Failed URLs are reported and the run continues; the exit code is 1 if any failed.
 
-**Search results** are ranked by fewest missing ingredients, then by the share you have,
-and list what you have and what's missing. A recipe needs at least one match to appear.
+**Search results** include every recipe that uses at least one selected ingredient (what
+you have, or what you feel like eating). Recipes using the most of the selection come first;
+ties go to the one needing the fewest other ingredients. Each result lists which selected
+ingredients it uses and what else it needs. Use `--limit` to keep long lists short.
 
 Pantry matching normalizes both sides the same way: "2 large eggs" and "eggs" both
 become `egg`, and "scallions" becomes `green onion`. Staples listed in
@@ -170,9 +182,36 @@ From Python:
 ```python
 from db import connect, find_recipes_by_pantry
 conn = connect("data/recipes.db")
-for m in find_recipes_by_pantry(conn, ["chicken", "garlic", "rice"], max_missing=2):
-    print(m.title, m.missing)
+for m in find_recipes_by_pantry(conn, ["chicken", "garlic", "rice"], limit=5):
+    print(m.title, f"uses {m.matched} of {m.selected}", m.missing)
 ```
+
+## Web app
+
+A mobile-first cookbook in `web/` (Next.js, Tailwind, Framer Motion) reads the database
+through a small FastAPI server. Run both (Node 20+):
+
+```bash
+python main.py thumbnails          # once: save thumbnails for recipes stored before the app existed
+uvicorn api.app:app --port 8000    # from the project root, with the venv active
+cd web && npm install && npm run dev   # http://localhost:3000
+```
+
+- **Cookbook**: every ready recipe with its video thumbnail, search, and
+  All / Favorites / Tried / To try filters. The heart saves a favorite.
+- **Recipe**: thumbnail hero, ingredient cards, "Mark as tried", and a floating,
+  draggable video player (Instagram, YouTube or TikTok embed) that stays on screen
+  while you cook.
+- **Cooking mode**: one step at a time with only the ingredients that step mentions;
+  "Done, next step" fades finished steps back. Progress is kept per device.
+
+New ingests save their thumbnail automatically. Favorite/tried marks live in the
+`recipes` table and survive re-ingesting. Step ingredients are matched from the step's
+wording (`db/step_ingredients.py`), so a step like "combine wet and dry" shows none.
+API: `GET /api/recipes[?status=ready|todo|all]`, `GET /api/recipes/{id}`,
+`PATCH /api/recipes/{id}` (`{"favorite": true}` / `{"tried": true}`),
+`GET /api/recipes/{id}/thumbnail`. `next.config.ts` proxies `/api` to
+`RECIPE_API_ORIGIN` (default `http://127.0.0.1:8000`).
 
 ## Configuration
 

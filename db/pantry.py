@@ -1,4 +1,4 @@
-"""Match stored recipes against what's in the pantry."""
+"""Find stored recipes that use the ingredients a user selected (what they have or want to eat)."""
 
 from __future__ import annotations
 
@@ -15,10 +15,11 @@ class PantryMatch:
     recipe_id: int
     title: str
     source_url: str
-    total: int
-    matched: int
+    total: int  # the recipe's distinct ingredients, staples excluded
+    matched: int  # how many of those were selected
     have: list[str]
     missing: list[str]
+    selected: int = 0  # how many distinct ingredients were selected, staples excluded
 
     @property
     def missing_count(self) -> int:
@@ -43,8 +44,8 @@ WHERE i.name NOT IN (SELECT name FROM ignored)
 GROUP BY r.id
 HAVING matched >= :min_matched
    AND (:max_missing IS NULL OR total - matched <= :max_missing)
-ORDER BY total - matched ASC,
-         CAST(matched AS REAL) / total DESC,
+ORDER BY matched DESC,           -- uses the most of what was selected
+         total - matched ASC,     -- then needs the fewest other ingredients
          r.title COLLATE NOCASE
 LIMIT :limit
 """
@@ -67,16 +68,19 @@ def find_recipes_by_pantry(
     min_matched: int = 1,
     limit: int | None = None,
 ) -> list[PantryMatch]:
-    """Return recipes ranked by fewest missing ingredients.
+    """Return recipes that use at least ``min_matched`` of the selected ingredients, those
+    using the most of them first, ties broken by fewest other ingredients needed.
 
-    ``ignore_ingredients`` (e.g. salt, water) are left out of both the totals and the
-    missing list. Recipes need at least ``min_matched`` pantry hits to be returned.
+    ``ignore_ingredients`` (e.g. salt, water) are left out of the counts and lists on both
+    sides. ``max_missing`` optionally drops recipes needing more than that many others.
     """
+    selected = _normalize_all(available_ingredients)
+    ignored = _normalize_all(ignore_ingredients)
     rows = conn.execute(
         _QUERY,
         {
-            "pantry": json.dumps(_normalize_all(available_ingredients)),
-            "ignored": json.dumps(_normalize_all(ignore_ingredients)),
+            "pantry": json.dumps(selected),
+            "ignored": json.dumps(ignored),
             "min_matched": min_matched,
             "max_missing": max_missing,
             "limit": -1 if limit is None else limit,
@@ -91,6 +95,7 @@ def find_recipes_by_pantry(
             matched=row["matched"],
             have=_split(row["have"]),
             missing=_split(row["missing"]),
+            selected=len(set(selected) - set(ignored)),
         )
         for row in rows
     ]

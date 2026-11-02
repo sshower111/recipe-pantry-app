@@ -117,8 +117,10 @@ def _fold_text(text: str) -> str:
     return "".join(out)
 
 
-def normalize_ingredient_name(raw: str) -> str:
-    """Return a canonical lowercase singular name, or "" if nothing meaningful remains."""
+def normalize_ingredient_name(raw: str, *, aliases: bool = True) -> str:
+    """Return a canonical lowercase singular name, or "" if nothing meaningful remains.
+    With ``aliases=False`` the name is cleaned but not mapped through ``ALIASES``
+    ("white sugar" stays "white sugar" instead of becoming "sugar")."""
     name = _fold_text(raw).lower().strip()
     name = _PARENS.sub(" ", name)
     name = name.split(",", 1)[0]  # "garlic, minced" -> "garlic"
@@ -132,7 +134,7 @@ def normalize_ingredient_name(raw: str) -> str:
         return ""
     words[-1] = _singularize(words[-1])
     name = " ".join(words)
-    return ALIASES.get(name, name)
+    return ALIASES.get(name, name) if aliases else name
 
 
 

@@ -31,27 +31,45 @@ def test_parse_ingredient_list_splits_commas():
     ]
 
 
-def test_search_ranks_and_lists_missing(db_path, capsys):
-    assert main.main(["search", "--ingredients", "garlic, butter, pasta"]) == 0
+def test_search_ranks_by_selected_ingredients_used(db_path, capsys):
+    conn = connect(db_path)
+    save_recipe(conn, source_url="https://example.com/toast", title="Garlic Toast",
+                ingredients=[{"name": "garlic"}, {"name": "bread"}])
+    conn.close()
+
+    assert main.main(["search", "--ingredients", "garlic, butter, pasta, lemon"]) == 0
     out = capsys.readouterr().out
-    assert out.index("Garlic Butter Pasta") < out.index("Garlic Shrimp")
-    assert "1. [1] Garlic Butter Pasta  (3/4 ingredients, missing 1)" in out
-    assert "     have:    butter, garlic, pasta\n     missing: parmesan\n" in out
-    assert "missing: chili flake, lemon, shrimp" in out  # names are normalized
+    # Shrimp uses 2 of the selected ingredients, so it beats Garlic Toast (1), even though
+    # Toast needs fewer other ingredients.
+    assert out.index("Garlic Butter Pasta") < out.index("Garlic Shrimp") < out.index("Garlic Toast")
+    assert "1. [1] Garlic Butter Pasta  (uses 3 of 4 selected; +1 more)" in out
+    assert "     uses:       butter, garlic, pasta\n     also needs: parmesan\n" in out
+    assert "2. [2] Garlic Shrimp  (uses 2 of 4 selected; +2 more)" in out
+    assert "also needs: chili flake, shrimp" in out  # names are normalized
+    assert "3. [3] Garlic Toast  (uses 1 of 4 selected; +1 more)" in out
     assert "salt" not in out  # staple
 
 
-def test_search_json_and_filters(db_path, capsys):
-    assert main.main(["search", "-i", "garlic, butter, pasta", "--max-missing", "1", "--json"]) == 0
+def test_search_json(db_path, capsys):
+    assert main.main(["search", "-i", "garlic, butter, pasta", "--json", "--limit", "1"]) == 0
     rows = json.loads(capsys.readouterr().out)
     assert [r["title"] for r in rows] == ["Garlic Butter Pasta"]
-    assert rows[0]["have"] == ["butter", "garlic", "pasta"]
-    assert rows[0]["missing"] == ["parmesan"]
+    assert (rows[0]["have"], rows[0]["missing"], rows[0]["selected"]) == (["butter", "garlic", "pasta"], ["parmesan"], 3)
+
+
+def test_search_selected_count_ignores_staples(db_path, capsys):
+    main.main(["search", "-i", "garlic, salt"])
+    assert "(uses 1 of 1 selected;" in capsys.readouterr().out
+
+
+def test_max_missing_option_is_gone(db_path):
+    with pytest.raises(SystemExit):
+        main.main(["search", "-i", "garlic", "--max-missing", "1"])
 
 
 def test_pantry_command_still_works_with_commas(db_path, capsys):
     assert main.main(["pantry", "garlic,", "butter", "pasta", "parmesan"]) == 0
-    assert "Garlic Butter Pasta  (4/4 ingredients, can make now)" in capsys.readouterr().out
+    assert "Garlic Butter Pasta  (uses 4 of 4 selected; nothing else)" in capsys.readouterr().out
 
 
 def test_search_without_matches(db_path, capsys):
@@ -65,11 +83,11 @@ def test_search_rejects_empty_list(db_path, capsys):
 
 def test_format_matches_can_make_now():
     match = PantryMatch(recipe_id=3, title="Toast", source_url="u", total=2, matched=2,
-                        have=["bread", "butter"], missing=[])
+                        have=["bread", "butter"], missing=[], selected=3)
     assert main.format_matches([match]) == (
-        "1. [3] Toast  (2/2 ingredients, can make now)\n"
-        "     have:    bread, butter\n"
-        "     missing: -\n"
+        "1. [3] Toast  (uses 2 of 3 selected; nothing else)\n"
+        "     uses:       bread, butter\n"
+        "     also needs: -\n"
         "     u"
     )
 
@@ -117,7 +135,7 @@ def test_batch_skips_existing_and_in_file_duplicates(db_path, fake_ingest, tmp_p
     ]
     assert all(skip for _, skip in fake_ingest)
     assert "SKIP   [1] https://www.instagram.com/p/old1/: already stored" in captured.out
-    assert "ADDED  [2] Recipe 2 (1 ingredients, makes serves 2;" in captured.out
+    assert "ADDED  [2] Recipe 2 (1 ingredients, no steps, makes serves 2;" in captured.out
     assert "duplicate of an earlier URL in this run" in captured.out
     assert "FAILED https://bad.example/video: Unsupported URL" in captured.err
     assert "1 added, 0 updated, 2 skipped, 1 failed" in captured.out
@@ -168,7 +186,8 @@ def test_list_todo_shows_posts_needing_a_recipe(db_with_empty, capsys):
     assert "[4] Brownies" in lines and "[3] Basque Cheesecake" in lines
     assert "      no ingredient list in the post; recipe at https://scientificallysweet.com/brownies/" in lines
     assert not any("Coconut Drink" in line or "Cookies" in line for line in lines)
-    assert lines[-1] == "Add a recipe page with: python main.py import-page <id> --url <recipe page>"
+    assert lines[-2] == "Add a recipe page with: python main.py import-page <id> --url <recipe page>"
+    assert lines[-1].startswith("If the site blocks downloads, save the page in your browser (Ctrl+S)")
 
 
 def test_list_all_includes_every_status(db_with_empty, capsys):
@@ -224,3 +243,20 @@ def test_batch_reports_posts_without_ingredients(db_path, monkeypatch, tmp_path,
     out = capsys.readouterr().out
     assert "ADDED  [9] Cheesecake (no ingredient list in the post; the caption says" in out
     assert "2 added, 0 updated, 0 skipped, 0 failed (of the saved: 2 needs a recipe; see `list --todo`)" in out
+
+
+def test_import_page_cli_passes_file(db_path, monkeypatch, tmp_path, capsys):
+    seen = {}
+
+    def fake_import(conn, recipe_id, *, url, file):
+        seen.update(recipe_id=recipe_id, url=url, file=file)
+        parsed = ParsedRecipe(title="Cookies", sources=["recipe_page"], yield_label="12 cookies",
+                              ingredients=[Ingredient(name="flour", amount=200, unit="g")])
+        return IngestResult(recipe_id=recipe_id, source_url="u", status="updated", recipe=parsed,
+                            transcript_source="none", ingredient_sources=["recipe_page"], title="Cookies")
+
+    monkeypatch.setattr(ingest, "import_recipe_page", fake_import)
+    saved = tmp_path / "page.html"
+    assert main.main(["import-page", "3", "--file", str(saved)]) == 0
+    assert seen == {"recipe_id": 3, "url": None, "file": saved}
+    assert "UPDATED [3] Cookies (1 ingredients, no steps, makes 12 cookies; ingredients from recipe_page" in capsys.readouterr().out

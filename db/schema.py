@@ -31,6 +31,11 @@ CREATE TABLE IF NOT EXISTS recipes (
     -- What the ingredient amounts make, e.g. "serves 4" or "1 standard loaf pan".
     yield_label       TEXT,
     raw_llm_json      TEXT,
+    -- Video thumbnail saved under <data dir>/thumbnails/ (file name only).
+    thumbnail_file    TEXT,
+    -- The user's own marks, set from the app; re-ingesting leaves them alone.
+    favorite          INTEGER NOT NULL DEFAULT 0,
+    tried             INTEGER NOT NULL DEFAULT 0,
     created_at        TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -53,6 +58,14 @@ CREATE TABLE IF NOT EXISTS recipe_ingredients (
     position      INTEGER NOT NULL
 );
 
+-- The method, one row per step in order.
+CREATE TABLE IF NOT EXISTS recipe_steps (
+    recipe_id INTEGER NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
+    position  INTEGER NOT NULL,
+    text      TEXT NOT NULL,
+    PRIMARY KEY (recipe_id, position)
+);
+
 CREATE INDEX IF NOT EXISTS idx_recipe_ingredients_recipe ON recipe_ingredients(recipe_id);
 CREATE INDEX IF NOT EXISTS idx_recipe_ingredients_ingredient ON recipe_ingredients(ingredient_id);
 """
@@ -67,6 +80,9 @@ _ADDED_COLUMNS = [
     ("recipes", "recipe_page_text", "TEXT"),
     ("recipes", "status", "TEXT CHECK (status IN ('ready', 'needs_recipe', 'not_recipe'))"),
     ("recipes", "status_note", "TEXT"),
+    ("recipes", "thumbnail_file", "TEXT"),
+    ("recipes", "favorite", "INTEGER NOT NULL DEFAULT 0"),
+    ("recipes", "tried", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 

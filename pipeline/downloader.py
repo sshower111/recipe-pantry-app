@@ -26,6 +26,7 @@ class MediaAssets:
     audio_path: Path | None
     caption_path: Path | None
     caption_text: str
+    thumbnail_url: str | None = None
 
     def files(self) -> list[Path]:
         return [p for p in (self.audio_path, self.caption_path) if p is not None]
@@ -144,4 +145,12 @@ def download_media(
         audio_path=_find_download(ydl, info),
         caption_path=caption_path,
         caption_text=caption_text,
+        thumbnail_url=info.get("thumbnail"),
     )
+
+
+def fetch_thumbnail_url(url: str) -> str | None:
+    """The video's thumbnail image URL, from its metadata alone (nothing is downloaded)."""
+    with YoutubeDL({"noplaylist": True, "quiet": True, "no_warnings": True}) as ydl:
+        info = ydl.extract_info(url, download=False)
+    return info.get("thumbnail")

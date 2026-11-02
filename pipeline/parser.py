@@ -40,6 +40,23 @@ class ParsedRecipe(BaseModel):
     # What the ingredient amounts make, e.g. "serves 4" or "1 standard loaf pan".
     yield_label: str | None
     ingredients: list[Ingredient]
+    # The method, one instruction per item, in order.
+    steps: list[str] = Field(default_factory=list)
+
+    @field_validator("steps", mode="before")
+    @classmethod
+    def _clean_steps(cls, value: Any) -> Any:
+        if isinstance(value, list):
+            return [s.strip() for s in value if isinstance(s, str) and s.strip()]
+        return value
+
+    @classmethod
+    def output_schema(cls) -> dict[str, Any]:
+        """JSON schema for Ollama's constrained decoding, with every field required so the
+        model always writes them (``steps`` has a default only for code building recipes)."""
+        schema = cls.model_json_schema()
+        schema["required"] = list(schema["properties"])
+        return schema
 
     @field_validator("yield_label", mode="before")
     @classmethod
@@ -87,6 +104,8 @@ Return JSON with:
 - "yield_label": what the ingredient amounts make, in the text's wording ("serves 4",
   "12 cookies", "1 standard loaf pan"), or null if it is not stated.
 - "ingredients": every ingredient used, each as {"name", "amount", "unit"}.
+- "steps": the method in order, one short instruction per item ("Cream the butter and both
+  sugars.", "Bake at 325°F for 50-60 minutes until deeply golden."). See "Rules for steps".
 
 Language: the video may be in any language (Spanish, Cantonese, Japanese, French, ...) and
 the sections may mix languages. ALWAYS write "title", "yield_label" and every ingredient
@@ -116,7 +135,17 @@ Rules for ingredients:
 - RECIPE PAGE is the full written recipe from the creator's website. When present it is the
   most reliable source: take the ingredient list, amounts and yield from it. Where it gives
   both cups and grams ("½ cup (113g) butter"), use the grams. Ignore footnote marks ("*").
-- If the text contains no recipe, return empty "sources" and "ingredients" lists.
+- If the text contains no recipe, return empty "sources", "ingredients" and "steps" lists.
+
+Rules for steps:
+- Use only the method the text actually gives (spoken, written, on screen, or the recipe
+  page); never invent steps. Prefer the RECIPE PAGE's or the caption's written method when
+  present, adding useful detail said in the video.
+- Keep oven temperatures, times, pan sizes and doneness cues exactly as given.
+- Write each step as one or two plain English sentences in the imperative ("Fold in the
+  flour."), without numbering, chit-chat, or sponsor mentions. Merge tiny actions; split
+  long paragraphs. At most 20 steps.
+- If the method is not described, return an empty "steps" list.
 """
 
 
@@ -157,7 +186,7 @@ def build_payload(
         "messages": messages,
         "stream": False,
         # A JSON schema here makes Ollama constrain decoding to valid output.
-        "format": ParsedRecipe.model_json_schema(),
+        "format": ParsedRecipe.output_schema(),
         "options": {"temperature": 0, "num_ctx": num_ctx},
     }
     # Thinking models (qwen3.x, deepseek-r1) reason by default, which is slow and

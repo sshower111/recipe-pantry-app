@@ -52,13 +52,22 @@ def test_save_upserts_by_url(conn):
     assert len(list_recipes(conn)) == 3
 
 
-def test_pantry_ranks_by_missing_count(conn):
+def test_pantry_ranks_by_selected_used_then_fewest_others(conn):
     matches = find_recipes_by_pantry(conn, ["eggs", "Butter", "garlic", "salt"])
     assert [m.title for m in matches] == ["Scrambled Eggs", "Garlic Butter Shrimp", "Beef Stir Fry"]
     eggs, shrimp, beef = matches
     assert (eggs.matched, eggs.total, eggs.missing) == (3, 3, [])
     assert shrimp.missing == ["lemon", "shrimp"]
     assert beef.missing_count == 4
+    assert {m.selected for m in matches} == {4}
+
+
+def test_pantry_more_selected_beats_fewer_missing(conn):
+    # Stir fry uses 3 of the selection but needs 2 more; eggs use 1 and need only 2 more.
+    matches = find_recipes_by_pantry(conn, ["beef", "soy sauce", "ginger", "egg"])
+    assert [(m.title, m.matched, m.missing_count) for m in matches] == [
+        ("Beef Stir Fry", 3, 2), ("Scrambled Eggs", 1, 2),
+    ]
 
 
 def test_pantry_ignores_staples(conn):

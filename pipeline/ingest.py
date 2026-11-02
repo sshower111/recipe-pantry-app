@@ -5,14 +5,16 @@ from __future__ import annotations
 import logging
 import sqlite3
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 from config import Settings, settings as default_settings
 from db import find_recipe_id, get_recipe, save_recipe, set_status_note
 from pipeline.downloader import MediaAssets, download_media, download_video
 from pipeline.parser import ParsedRecipe, parse_recipe
+from pipeline.thumbnails import save_thumbnail
 from pipeline.urls import canonical_url, classify_missing_recipe, recipe_link
-from pipeline.webrecipe import RecipePageError, WebRecipe, fetch_recipe_page
+from pipeline.webrecipe import RecipePageError, WebRecipe, fetch_recipe_page, read_recipe_file
 
 log = logging.getLogger(__name__)
 
@@ -129,17 +131,19 @@ class ParseInputs:
     on_screen: str | None = None
     page: WebRecipe | None = None
     page_error: str | None = None
+    page_text: str | None = None  # a previously stored recipe page, when ``page`` is None
 
 
 def _parse(inputs: ParseInputs, cfg: Settings) -> ParsedRecipe:
-    extra = "".join([" + on-screen text" if inputs.on_screen else "", " + recipe page" if inputs.page else ""])
+    page_text = inputs.page.as_text() if inputs.page else (inputs.page_text or "")
+    extra = "".join([" + on-screen text" if inputs.on_screen else "", " + recipe page" if page_text else ""])
     log.info("Parsing recipe with %s (transcript from %s%s)", cfg.ollama_model, inputs.transcript_source, extra)
     return parse_recipe(
         title=inputs.title,
         description=inputs.description,
         transcript=inputs.transcript,
         on_screen=inputs.on_screen or "",
-        recipe_page=inputs.page.as_text() if inputs.page else "",
+        recipe_page=page_text,
         model=cfg.ollama_model,
         base_url=cfg.ollama_url,
         timeout=cfg.ollama_timeout,
@@ -222,6 +226,7 @@ def ingest_url(
             source_url=source_url,
             title=title,
             ingredients=[i.model_dump() for i in recipe.ingredients],
+            steps=recipe.steps,
             yield_label=recipe.yield_label,
             ingredient_sources=sources,
             video_id=media.video_id,
@@ -236,6 +241,7 @@ def ingest_url(
             status=status,
             status_note=note,
         )
+        save_thumbnail(conn, recipe_id, media.thumbnail_url, cfg.data_dir / "thumbnails")
         return IngestResult(
             recipe_id=recipe_id,
             source_url=source_url,
@@ -255,23 +261,54 @@ def ingest_url(
 
 
 def import_recipe_page(
-    conn: sqlite3.Connection, recipe_id: int, cfg: Settings = default_settings, *, url: str | None = None
+    conn: sqlite3.Connection,
+    recipe_id: int,
+    cfg: Settings = default_settings,
+    *,
+    url: str | None = None,
+    file: Path | None = None,
 ) -> IngestResult:
     """Re-parse a stored recipe with the ingredient list from its recipe web page: ``url``,
     or else the link in its caption. Uses the stored text, so nothing is downloaded again.
+
+    With ``file``, the page is one the user saved (or an ingredient list they pasted into a
+    text file) instead of a download; ``url``, if given, is recorded as where it came from.
     Raises ValueError / RecipePageError when there is no usable page."""
     stored = get_recipe(conn, recipe_id)
     if stored is None:
         raise ValueError(f"No recipe with id {recipe_id}")
-    link = url or recipe_link(stored["description"] or "")
-    if link is None:
+    # An explicit --url, else the page imported before, else the link in the caption.
+    link = url or stored["recipe_page_url"] or recipe_link(stored["description"] or "")
+    if file is None and link is None:
         raise ValueError(f"Recipe {recipe_id}'s caption has no recipe link; pass one with --url")
-    log.info("Fetching recipe page %s", link)
     try:
-        page = fetch_recipe_page(link)
+        if file is not None:
+            log.info("Reading saved recipe %s", file)
+            page = read_recipe_file(file, url=url, name=stored["title"])
+        else:
+            log.info("Fetching recipe page %s", link)
+            page = fetch_recipe_page(link)
     except RecipePageError as exc:
-        set_status_note(conn, recipe_id, str(exc))  # remembered for `list --todo`
+        if file is None:  # a bad local file says nothing about the post
+            set_status_note(conn, recipe_id, str(exc))  # remembered for `list --todo`
         raise
+    try:
+        return reparse_recipe(conn, recipe_id, cfg, page=page)
+    except ValueError:
+        if file is None:
+            set_status_note(conn, recipe_id, f"No ingredients could be read from {page.url}")
+        raise
+
+
+def reparse_recipe(
+    conn: sqlite3.Connection, recipe_id: int, cfg: Settings = default_settings, *, page: WebRecipe | None = None
+) -> IngestResult:
+    """Parse a stored recipe again from its saved text (caption, transcript, on-screen text,
+    recipe page), e.g. after a prompt change; nothing is downloaded. ``page`` replaces the
+    stored recipe page. A parse that finds no ingredients never overwrites one that had them."""
+    stored = get_recipe(conn, recipe_id)
+    if stored is None:
+        raise ValueError(f"No recipe with id {recipe_id}")
     inputs = ParseInputs(
         title=stored["title"],
         description=stored["description"] or "",
@@ -279,18 +316,23 @@ def import_recipe_page(
         transcript_source=stored["transcript_source"] or "none",
         on_screen=stored["on_screen_text"],
         page=page,
+        page_text=stored["recipe_page_text"],
     )
     recipe = _parse(inputs, cfg)
-    if not recipe.ingredients:
-        message = f"No ingredients could be read from {page.url}"
-        set_status_note(conn, recipe_id, message)
-        raise ValueError(message)
-    sources = ingredient_sources(recipe, inputs.transcript_source)
+    if not recipe.ingredients and (page is not None or stored["ingredients"]):
+        where = page.url or "the saved file" if page else "the saved text"
+        raise ValueError(f"No ingredients could be read from {where}; recipe {recipe_id} left as it was")
+    sources = ingredient_sources(recipe, inputs.transcript_source) if recipe.ingredients else []
+    title = recipe.title.strip()
+    if title.lower() in _NO_TITLE:
+        title = stored["title"]
+    status = "ready" if recipe.ingredients else classify_missing_recipe(stored["description"])
     save_recipe(
         conn,
         source_url=stored["source_url"],
-        title=recipe.title.strip() or stored["title"],
+        title=title,
         ingredients=[i.model_dump() for i in recipe.ingredients],
+        steps=recipe.steps,
         yield_label=recipe.yield_label,
         ingredient_sources=sources,
         video_id=stored["video_id"],
@@ -299,9 +341,11 @@ def import_recipe_page(
         transcript=stored["transcript"],
         transcript_source=stored["transcript_source"],
         on_screen_text=stored["on_screen_text"],
-        recipe_page_url=page.url,
-        recipe_page_text=page.as_text(),
+        recipe_page_url=page.url if page else stored["recipe_page_url"],
+        recipe_page_text=page.as_text() if page else stored["recipe_page_text"],
         raw_llm_json=recipe.model_dump_json(),
+        status=status,
+        status_note=None if recipe.ingredients else stored["status_note"],
     )
     return IngestResult(
         recipe_id=recipe_id,
@@ -311,6 +355,7 @@ def import_recipe_page(
         transcript_source=inputs.transcript_source,
         ingredient_sources=sources,
         description=stored["description"],
-        title=recipe.title.strip() or stored["title"],
-        recipe_status="ready",
+        title=title,
+        recipe_status=status,
+        status_note=None if recipe.ingredients else stored["status_note"],
     )

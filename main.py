@@ -2,10 +2,11 @@
 
     python main.py ingest <url> [<url> ...] [--skip-existing]
     python main.py batch --file urls.txt [--refresh]
-    python main.py search --ingredients "garlic, butter, pasta" --max-missing 3
-    python main.py pantry chicken garlic "soy sauce" --max-missing 3
+    python main.py search --ingredients "garlic, butter, pasta"
+    python main.py pantry chicken garlic "soy sauce"
     python main.py list [--todo | --all]
     python main.py show <recipe_id>
+    python main.py import-page <recipe_id> [--url <page>] [--file saved.html|ingredients.txt]
 """
 
 from __future__ import annotations
@@ -80,12 +81,7 @@ def ingest_many(urls: list[str], *, skip_existing: bool) -> int:
             print(f"{result.status.upper():<6} [{result.recipe_id}] {result.title or recipe.title} "
                   f"({describe_missing_list(result.description, result.status_note)})")
             continue
-        makes = f", makes {recipe.yield_label}" if recipe.yield_label else ""
-        print(
-            f"{result.status.upper():<6} [{result.recipe_id}] {result.title or recipe.title} "
-            f"({len(recipe.ingredients)} ingredients{makes}; "
-            f"{describe_sources(result.ingredient_sources or [], result.transcript_source)})"
-        )
+        print(f"{result.status.upper():<6} {describe_result(result)}")
     if len(urls) > 1:
         summary = ", ".join(f"{n} {status}" for status, n in counts.items())
         extra = ", ".join(f"{n} {STATUS_LABELS[k]}" for k, n in without_list.items() if n)
@@ -152,7 +148,6 @@ def run_pantry_query(ingredients: list[str], args: argparse.Namespace) -> int:
         open_db(),
         ingredients,
         ignore_ingredients=() if args.no_staples else settings.pantry_staples,
-        max_missing=args.max_missing,
         limit=args.limit,
     )
     if args.json:
@@ -167,11 +162,11 @@ def format_matches(matches: list[PantryMatch]) -> str:
         return "No matching recipes."
     blocks = []
     for rank, m in enumerate(matches, 1):
-        status = "can make now" if not m.missing else f"missing {m.missing_count}"
+        needs = "nothing else" if not m.missing else f"+{m.missing_count} more"
         blocks.append(
-            f"{rank}. [{m.recipe_id}] {m.title}  ({m.matched}/{m.total} ingredients, {status})\n"
-            f"     have:    {', '.join(m.have) or '-'}\n"
-            f"     missing: {', '.join(m.missing) or '-'}\n"
+            f"{rank}. [{m.recipe_id}] {m.title}  (uses {m.matched} of {m.selected} selected; {needs})\n"
+            f"     uses:       {', '.join(m.have) or '-'}\n"
+            f"     also needs: {', '.join(m.missing) or '-'}\n"
             f"     {m.source_url}"
         )
     return "\n\n".join(blocks)
@@ -197,6 +192,8 @@ def cmd_list(args: argparse.Namespace) -> int:
             print(f"      {describe_missing_list(r['description'], r['status_note'])}")
             print(f"      {r['source_url']}")
         print("\nAdd a recipe page with: python main.py import-page <id> --url <recipe page>")
+        print("If the site blocks downloads, save the page in your browser (Ctrl+S) and use "
+              "--file <saved page.html>, or paste the ingredients into a .txt file.")
         return 0
 
     for r in list_recipes(conn, None if args.all else ["ready"]):
@@ -219,17 +216,54 @@ def cmd_import_page(args: argparse.Namespace) -> int:
     from pipeline.webrecipe import RecipePageError
 
     try:
-        result = import_recipe_page(open_db(), args.recipe_id, url=args.url)
+        result = import_recipe_page(open_db(), args.recipe_id, url=args.url,
+                                    file=Path(args.file) if args.file else None)
     except (ValueError, RecipePageError) as exc:
         print(f"FAILED {exc}", file=sys.stderr)
         return 1
+    print(f"UPDATED {describe_result(result)}")
+    return 0
+
+
+def describe_result(result) -> str:
+    """'[id] Title (12 ingredients, 6 steps, makes ...; ingredients from ...)'."""
     recipe = result.recipe
     makes = f", makes {recipe.yield_label}" if recipe.yield_label else ""
-    print(
-        f"UPDATED [{result.recipe_id}] {result.title or recipe.title} ({len(recipe.ingredients)} ingredients{makes}; "
+    steps = f", {len(recipe.steps)} steps" if recipe.steps else ", no steps"
+    return (
+        f"[{result.recipe_id}] {result.title or recipe.title} "
+        f"({len(recipe.ingredients)} ingredients{steps}{makes}; "
         f"{describe_sources(result.ingredient_sources or [], result.transcript_source)})"
     )
-    return 0
+
+
+def cmd_reparse(args: argparse.Namespace) -> int:
+    """Re-run the model on saved recipes (no downloads), e.g. to add steps to recipes saved
+    before steps existed. Keeps going past failures."""
+    from pipeline.ingest import reparse_recipe
+    from pipeline.parser import OllamaError
+
+    conn = open_db()
+    ids = list(args.recipe_ids)
+    if args.missing_steps:
+        ids += [r["id"] for r in list_recipes(conn, ["ready"]) if not r["step_count"]]
+    ids = list(dict.fromkeys(ids))
+    if not ids:
+        print("Nothing to reparse.")
+        return 0
+    print(f"Reparsing {len(ids)} recipe{'s' * (len(ids) != 1)} (about a minute each)")
+    failures = 0
+    for n, recipe_id in enumerate(ids, 1):
+        try:
+            result = reparse_recipe(conn, recipe_id)
+        except (ValueError, OllamaError) as exc:
+            print(f"FAILED [{recipe_id}] {exc}", file=sys.stderr)
+            failures += 1
+            continue
+        print(f"{n}/{len(ids)} UPDATED {describe_result(result)}")
+    if len(ids) > 1:
+        print(f"{len(ids) - failures} reparsed, {failures} failed")
+    return 1 if failures else 0
 
 
 def cmd_renormalize(args: argparse.Namespace) -> int:
@@ -242,6 +276,36 @@ def cmd_renormalize(args: argparse.Namespace) -> int:
     verb = "Would update" if args.dry_run else "Updated"
     print(f"{verb} {len(changes)} ingredient name{'s' * (len(changes) != 1)}.")
     return 0
+
+
+def cmd_thumbnails(args: argparse.Namespace) -> int:
+    """Save thumbnails for recipes stored without one (or all, with --refresh)."""
+    from pipeline.downloader import fetch_thumbnail_url
+    from pipeline.thumbnails import save_thumbnail
+
+    conn = open_db()
+    out_dir = settings.data_dir / "thumbnails"
+    rows = [
+        (r["id"], r["source_url"])
+        for r in list_recipes(conn, ["ready", "needs_recipe"])
+        if args.refresh or not (r["thumbnail_file"] and (out_dir / r["thumbnail_file"]).exists())
+    ]
+    if not rows:
+        print("Every recipe already has a thumbnail.")
+        return 0
+    failures = 0
+    for n, (recipe_id, url) in enumerate(rows, 1):
+        try:
+            image_url = fetch_thumbnail_url(url)
+        except Exception as exc:  # yt-dlp raises many types; report and move on
+            image_url = None
+            print(f"{n}/{len(rows)} FAILED [{recipe_id}] {exc}", file=sys.stderr)
+        if image_url and save_thumbnail(conn, recipe_id, image_url, out_dir):
+            print(f"{n}/{len(rows)} saved [{recipe_id}]")
+        else:
+            failures += 1
+    print(f"{len(rows) - failures} saved, {failures} failed")
+    return 1 if failures else 0
 
 
 def cmd_show(args: argparse.Namespace) -> int:
@@ -269,11 +333,17 @@ def cmd_show(args: argparse.Namespace) -> int:
         amount = f"{ing['amount']:g} " if ing["amount"] is not None else ""
         unit = f"{ing['unit']} " if ing["unit"] else ""
         print(f"  - {amount}{unit}{ing['raw_name']}")
+    if recipe["steps"]:
+        print("\nSteps:")
+        width = len(str(len(recipe["steps"])))
+        for n, step in enumerate(recipe["steps"], 1):
+            print(f"  {n:>{width}}. {step}")
+    else:
+        print("\nSteps: not described in the post (try `reparse` if it was saved before steps existed)")
     return 0
 
 
 def add_query_options(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--max-missing", type=int, default=None, help="hide recipes missing more than this")
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--no-staples", action="store_true", help="count salt/water/etc. as ingredients")
     p.add_argument("--json", action="store_true")
@@ -320,13 +390,25 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("import-page",
                        help="read a stored recipe's ingredients from its recipe web page")
     p.add_argument("recipe_id", type=int)
-    p.add_argument("--url", help="the recipe page (default: the link in the post's caption)")
+    p.add_argument("--url", help="the recipe page (default: the page imported before, else the caption's link)")
+    p.add_argument("--file", help="a recipe page you saved from your browser (.html), or a .txt file "
+                                  "with the ingredient list pasted in; for sites that block downloads")
     p.set_defaults(func=cmd_import_page)
+
+    p = sub.add_parser("reparse", help="run the model again on saved recipes, from their saved text")
+    p.add_argument("recipe_ids", type=int, nargs="*", help="recipes to reparse")
+    p.add_argument("--missing-steps", action="store_true",
+                   help="every ready recipe that has no steps yet (e.g. saved before steps existed)")
+    p.set_defaults(func=cmd_reparse)
 
     p = sub.add_parser("renormalize",
                        help="recompute stored ingredient names after normalizer/alias changes")
     p.add_argument("--dry-run", action="store_true", help="show the changes without saving them")
     p.set_defaults(func=cmd_renormalize)
+
+    p = sub.add_parser("thumbnails", help="save video thumbnails for the app (recipes without one)")
+    p.add_argument("--refresh", action="store_true", help="download every thumbnail again")
+    p.set_defaults(func=cmd_thumbnails)
 
     p = sub.add_parser("show", help="show one recipe")
     p.add_argument("recipe_id", type=int)

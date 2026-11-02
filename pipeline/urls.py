@@ -51,6 +51,19 @@ def canonical_url(url: str) -> str:
     return parts._replace(fragment="").geturl()
 
 
+def embed_url(source_url: str) -> tuple[str, str] | None:
+    """``(platform, player URL)`` for showing a stored video inside a page, or None for
+    sites without an embeddable player."""
+    parts = urlsplit(canonical_url(source_url))
+    if parts.hostname == "www.instagram.com" and (match := _INSTAGRAM.match(parts.path)):
+        return "instagram", f"https://www.instagram.com/p/{match.group(1)}/embed/"
+    if parts.hostname == "www.youtube.com" and (video_id := parse_qs(parts.query).get("v")):
+        return "youtube", f"https://www.youtube-nocookie.com/embed/{video_id[0]}?playsinline=1&rel=0"
+    if parts.hostname == "www.tiktok.com" and (match := _TIKTOK.match(parts.path)):
+        return "tiktok", f"https://www.tiktok.com/embed/v2/{match.group(2)}"
+    return None
+
+
 def read_url_file(lines: Iterable[str]) -> tuple[list[str], int]:
     """Pull URLs out of a batch file's lines, ignoring any other text.
 

@@ -84,7 +84,7 @@ def test_parse_recipe_retries_until_valid(monkeypatch):
     assert recipe.ingredients[0].amount == 2
     assert recipe.yield_label == "serves 1"
     assert len(sent) == 2
-    assert set(sent[0]["format"]["required"]) == {"title", "sources", "yield_label", "ingredients"}
+    assert set(sent[0]["format"]["required"]) == {"title", "sources", "yield_label", "ingredients", "steps"}
     assert sent[0]["stream"] is False
     assert sent[0]["think"] is False
 

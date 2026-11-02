@@ -95,3 +95,76 @@ def test_fetch_recipe_page_network_error(monkeypatch):
     monkeypatch.setattr(webrecipe.requests, "get", boom)
     with pytest.raises(RecipePageError, match="could not fetch"):
         fetch_recipe_page("https://blog.example.com/x")
+
+
+# --- files the user saved themselves ------------------------------------------------------
+
+from pipeline.webrecipe import read_recipe_file, recipe_from_text  # noqa: E402
+
+
+def test_read_saved_html_page_uses_canonical_link(tmp_path):
+    saved = tmp_path / "Gluten Free Lemon Curd Cookies - The Loopy Whisk.html"
+    head = '<link rel="canonical" href="https://theloopywhisk.com/2023/04/07/gluten-free-lemon-curd-cookies/">'
+    saved.write_text(page(json.dumps(RECIPE)).replace("<head>", "<head>" + head), encoding="utf-8")
+    recipe = read_recipe_file(saved)
+    assert recipe.url == "https://theloopywhisk.com/2023/04/07/gluten-free-lemon-curd-cookies/"
+    assert recipe.ingredients[0].startswith("7 oz (200g) bittersweet chocolate")
+    # An explicit --url wins.
+    assert read_recipe_file(saved, url="https://example.com/x").url == "https://example.com/x"
+
+
+def test_read_saved_html_page_saved_from_marker(tmp_path):
+    saved = tmp_path / "page.htm"
+    saved.write_text("<!-- saved from url=(0040)https://blog.example.com/brownies/ -->\n" + page(json.dumps(RECIPE)),
+                     encoding="utf-8")
+    assert read_recipe_file(saved).url == "https://blog.example.com/brownies/"
+
+
+def test_read_saved_html_without_recipe_data_suggests_text(tmp_path):
+    saved = tmp_path / "page.html"
+    saved.write_text("<html><body>Lemon cookies! 200g flour</body></html>", encoding="utf-8")
+    with pytest.raises(RecipePageError, match="no recipe data found in page.html; copy the ingredient list"):
+        read_recipe_file(saved)
+
+
+def test_read_pasted_ingredient_list(tmp_path):
+    txt = tmp_path / "cookies.txt"
+    txt.write_text(
+        "Ingredients:\n"
+        "▢ 120 g unsalted butter, softened\n"
+        "- 150 g caster sugar\n"
+        "\n"
+        "For the filling:\n"
+        "• 1 batch lemon curd\n"
+        "2. 1 large egg\n"
+        "Makes: 12 cookies\n",
+        encoding="utf-8",
+    )
+    recipe = read_recipe_file(txt, url="https://theloopywhisk.com/x/", name="Lemon Curd Cookies")
+    assert recipe.ingredients == [
+        "120 g unsalted butter, softened", "150 g caster sugar", "1 batch lemon curd", "1 large egg",
+    ]
+    assert (recipe.yield_text, recipe.url, recipe.name) == ("12 cookies", "https://theloopywhisk.com/x/",
+                                                            "Lemon Curd Cookies")
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [("Serves 8", "serves 8"), ("Servings: 4-6", "serves 4-6"), ("Makes: 12 cookies", "12 cookies"),
+     ("Yield: 1 loaf", "1 loaf")],
+)
+def test_pasted_yield_lines(line, expected):
+    assert recipe_from_text(f"2 eggs\n{line}", url=None).yield_text == expected
+
+
+def test_read_pasted_utf16_notepad_file(tmp_path):
+    txt = tmp_path / "list.txt"
+    txt.write_bytes("200 g crème fraîche\n2 eggs\n".encode("utf-16"))
+    assert read_recipe_file(txt).ingredients == ["200 g crème fraîche", "2 eggs"]
+
+
+def test_read_recipe_file_errors(tmp_path):
+    with pytest.raises(RecipePageError, match="cannot read"):
+        read_recipe_file(tmp_path / "missing.txt")
+    with pytest.raises(RecipePageError, match="no ingredient lines"):
+        recipe_from_text("Ingredients:\n\n", url=None)

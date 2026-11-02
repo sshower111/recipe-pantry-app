@@ -8,9 +8,12 @@ from db.repository import (
     list_recipes,
     renormalize_ingredients,
     save_recipe,
+    set_marks,
     set_status_note,
+    set_thumbnail,
 )
 from db.schema import connect, init_db
+from db.step_ingredients import match_step_ingredients
 
 __all__ = [
     "PantryMatch",
@@ -25,6 +28,9 @@ __all__ = [
     "normalize_ingredient_name",
     "normalize_unit",
     "renormalize_ingredients",
+    "match_step_ingredients",
     "save_recipe",
+    "set_marks",
     "set_status_note",
+    "set_thumbnail",
 ]

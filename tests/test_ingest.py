@@ -382,3 +382,39 @@ def test_fallback_title_ignores_placeholders(placeholder):
     media = MediaAssets(url="u", video_id="X1", title="", description="", uploader="Por por and Colin",
                         duration=None, audio_path=None, caption_path=None, caption_text="")
     assert ingest.fallback_title(placeholder, media) == "Post by Por por and Colin"
+
+
+def test_import_recipe_page_from_saved_file(fake, cfg, monkeypatch, tmp_path):
+    fake.parses = [[]]
+    fake.on_screen = ""
+    fake.description = "Full recipe on my blog, link in bio!"
+    conn = connect(":memory:")
+    rid = ingest_url("https://www.instagram.com/p/X1/", conn, dataclasses.replace(cfg, recipe_pages=False)).recipe_id
+
+    def no_download(url):
+        raise AssertionError("--file must not download anything")
+
+    monkeypatch.setattr(ingest, "fetch_recipe_page", no_download)
+    txt = tmp_path / "toast.txt"
+    txt.write_text("2 slices bread\n1 tbsp butter\n1 tsp honey\nServes 1\n", encoding="utf-8")
+    fake.parses = [FULL]
+    result = ingest.import_recipe_page(conn, rid, cfg, file=txt, url="https://blog.example.com/toast/")
+
+    assert result.recipe_status == "ready"
+    assert "- 2 slices bread" in fake.prompts[-1]["recipe_page"]
+    stored = get_recipe(conn, rid)
+    assert stored["status"] == "ready"
+    assert stored["recipe_page_url"] == "https://blog.example.com/toast/"
+    assert "Yield: serves 1" in stored["recipe_page_text"]
+
+
+def test_import_recipe_page_bad_file_leaves_note_alone(fake, cfg, tmp_path):
+    fake.parses = [[]]
+    fake.on_screen = ""
+    conn = connect(":memory:")
+    rid = ingest_url("https://www.instagram.com/p/X1/", conn, dataclasses.replace(cfg, recipe_pages=False)).recipe_id
+    empty = tmp_path / "empty.txt"
+    empty.write_text("\n", encoding="utf-8")
+    with pytest.raises(ingest.RecipePageError, match="no ingredient lines"):
+        ingest.import_recipe_page(conn, rid, cfg, file=empty)
+    assert get_recipe(conn, rid)["status_note"] is None

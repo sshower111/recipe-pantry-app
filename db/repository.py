@@ -21,6 +21,7 @@ def save_recipe(
     source_url: str,
     title: str,
     ingredients: Iterable[Mapping[str, Any]],
+    steps: Iterable[str] = (),
     yield_label: str | None = None,
     ingredient_sources: Iterable[str] = (),
     video_id: str | None = None,
@@ -76,6 +77,11 @@ def save_recipe(
         ).fetchone()[0]
 
         conn.execute("DELETE FROM recipe_ingredients WHERE recipe_id = ?", (recipe_id,))
+        conn.execute("DELETE FROM recipe_steps WHERE recipe_id = ?", (recipe_id,))
+        conn.executemany(
+            "INSERT INTO recipe_steps (recipe_id, position, text) VALUES (?, ?, ?)",
+            [(recipe_id, n, text) for n, text in enumerate(t.strip() for t in steps if t and t.strip())],
+        )
 
         position = 0
         for item in ingredients:
@@ -108,6 +114,25 @@ def save_recipe(
 def set_status_note(conn: sqlite3.Connection, recipe_id: int, note: str | None) -> None:
     with conn:
         conn.execute("UPDATE recipes SET status_note = ? WHERE id = ?", (note, recipe_id))
+
+
+def set_thumbnail(conn: sqlite3.Connection, recipe_id: int, file_name: str | None) -> None:
+    with conn:
+        conn.execute("UPDATE recipes SET thumbnail_file = ? WHERE id = ?", (file_name, recipe_id))
+
+
+def set_marks(
+    conn: sqlite3.Connection, recipe_id: int, *, favorite: bool | None = None, tried: bool | None = None
+) -> dict[str, bool] | None:
+    """Set the user's favorite/tried marks (None leaves a mark as it is). Returns both marks,
+    or None if there is no such recipe."""
+    with conn:
+        conn.execute(
+            "UPDATE recipes SET favorite = COALESCE(?, favorite), tried = COALESCE(?, tried) WHERE id = ?",
+            (favorite, tried, recipe_id),
+        )
+    row = conn.execute("SELECT favorite, tried FROM recipes WHERE id = ?", (recipe_id,)).fetchone()
+    return None if row is None else {"favorite": bool(row[0]), "tried": bool(row[1])}
 
 
 def backfill_status(conn: sqlite3.Connection, classify_empty: Callable[[str | None], str]) -> int:
@@ -190,6 +215,11 @@ def get_recipe(conn: sqlite3.Connection, recipe_id: int) -> dict[str, Any] | Non
             (recipe_id,),
         )
     ]
+    recipe["steps"] = [
+        r[0] for r in conn.execute(
+            "SELECT text FROM recipe_steps WHERE recipe_id = ? ORDER BY position", (recipe_id,)
+        )
+    ]
     return recipe
 
 
@@ -201,8 +231,9 @@ def list_recipes(conn: sqlite3.Connection, statuses: Iterable[str] | None = None
         for r in conn.execute(
             """
             SELECT r.id, r.title, r.source_url, r.yield_label, r.uploader, r.description,
-                   r.status, r.status_note,
-                   COUNT(DISTINCT ri.ingredient_id) AS ingredient_count
+                   r.status, r.status_note, r.video_id, r.thumbnail_file, r.favorite, r.tried,
+                   COUNT(DISTINCT ri.ingredient_id) AS ingredient_count,
+                   (SELECT COUNT(*) FROM recipe_steps rs WHERE rs.recipe_id = r.id) AS step_count
             FROM recipes r
             LEFT JOIN recipe_ingredients ri ON ri.recipe_id = r.id
             WHERE :wanted IS NULL OR r.status IN (SELECT value FROM json_each(:wanted))

@@ -1,6 +1,22 @@
 import pytest
 
-from pipeline.urls import canonical_url, points_elsewhere, read_url_file, recipe_link
+from pipeline.urls import canonical_url, embed_url, points_elsewhere, read_url_file, recipe_link
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://www.instagram.com/reel/DZlOp2nJL4I/?igsh=x",
+         ("instagram", "https://www.instagram.com/p/DZlOp2nJL4I/embed/")),
+        ("https://youtu.be/dQw4w9WgXcQ",
+         ("youtube", "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?playsinline=1&rel=0")),
+        ("https://www.tiktok.com/@chef.k/video/7300000000000000000",
+         ("tiktok", "https://www.tiktok.com/embed/v2/7300000000000000000")),
+        ("https://example.com/recipe", None),
+    ],
+)
+def test_embed_url(url, expected):
+    assert embed_url(url) == expected
 
 
 @pytest.mark.parametrize(
