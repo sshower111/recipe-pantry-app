@@ -25,16 +25,21 @@ Real output from my own database of about 90 recipes saved from Instagram reels.
 **What can I cook with what's in the fridge?**
 
 ```
-$ python main.py pantry pork shrimp egg "green onion" "soy sauce" "oyster sauce" garlic --max-missing 3
-1. [65] Steamed Pork Patty with Egg  (5/6 ingredients, missing 1)
-     have:    egg, green onion, oyster sauce, pork, soy sauce
-     missing: cornstarch water
-     https://www.instagram.com/p/Dd0PyCxBqds/
+$ python main.py pantry flour sugar "brown sugar" honey yeast eggs "baking soda" --max-missing 1
+1. [84] Classic Japanese Bagel  (4/4 ingredients, can make now)
+     have:    flour, honey, sugar, yeast
+     missing: -
+     instagram.com/p/CzJiZmOLfaW
 
-2. [106] Maxie's Wonton Noodle Soup  (2/5 ingredients, missing 3)
-     have:    pork, shrimp
-     missing: duck egg noodle, pork fat, yellow chive
-     https://www.instagram.com/p/DRa-0aEjEgM/
+2. [37] No-Yeast Youtiao  (3/4 ingredients, missing 1)
+     have:    baking soda, flour, sugar
+     missing: baking powder
+     instagram.com/p/C188sW2PfKU
+
+3. [33] Honey Butter Toast  (2/3 ingredients, missing 1)
+     have:    brown sugar, honey
+     missing: butter
+     instagram.com/p/C63hOr1ysaW
 ```
 
 **A stored recipe, parsed from the reel's caption and speech:**
@@ -42,7 +47,7 @@ $ python main.py pantry pork shrimp egg "green onion" "soy sauce" "oyster sauce"
 ```
 $ python main.py show 55
 Salted Maple Banana Bread
-https://www.instagram.com/p/DZva78zpQuq/
+instagram.com/p/DZva78zpQuq
 Ingredients from description, speech; transcript: whisper
 Makes: 1 standard loaf pan
 
@@ -62,6 +67,13 @@ Makes: 1 standard loaf pan
 ```
 
 Salt, pepper, water and oil count as pantry staples, so they never show up as missing.
+Links are shortened here; the CLI prints full URLs.
+
+Recipes by their original creators:
+[Classic Japanese Bagel](https://www.instagram.com/p/CzJiZmOLfaW/) ·
+[No-Yeast Youtiao](https://www.instagram.com/p/C188sW2PfKU/) ·
+[Honey Butter Toast](https://www.instagram.com/p/C63hOr1ysaW/) ·
+[Salted Maple Banana Bread](https://www.instagram.com/p/DZva78zpQuq/)
 
 ## Layout
 
