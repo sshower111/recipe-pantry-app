@@ -33,9 +33,11 @@ based on available pantry items. Everything runs locally: no cloud APIs.
      recipes using at least one selected ingredient, ranked by how many selected ingredients they
      use (most first), then fewest other ingredients (user's choice: "uses any, best first"; the
      CLI's `--max-missing` was dropped, the function keeps `max_missing` as an optional filter).
-4. **Native iOS app** (planned, built on a Mac): SwiftUI app in `ios/` (iOS 17+) reading the
-   FastAPI server over Wi-Fi, with a cooking-step Live Activity. Runbook: `docs/ios/README.md`;
-   JSON contract: `docs/ios/api.md` (regenerate its samples if API responses change).
+4. **Native iOS app** (done on `ios-app`, all runbook build steps 1-8): SwiftUI app in `ios/`
+   (iOS 17+) reading the FastAPI server over Wi-Fi: cookbook feed with ingredient search,
+   cooking mode, cooking-step Live Activity, Settings, offline copy, share-sheet ingest.
+   Runbook: `docs/ios/README.md`; JSON contract: `docs/ios/api.md` (regenerate its samples
+   if API responses change).
 
 ## Layout
 
@@ -43,7 +45,10 @@ based on available pantry items. Everything runs locally: no cloud APIs.
 config.py        Settings dataclass from RECIPE_* env vars / .env (see .env.example)
 main.py          argparse CLI: init-db | ingest | batch | search | pantry | list | show | import-page |
                  renormalize | thumbnails
-api/app.py       FastAPI JSON server for the web and iOS apps (create_app(db_path, thumbnails_dir, staples))
+api/app.py       FastAPI JSON server for the web and iOS apps (create_app(db_path, thumbnails_dir, staples, ingest))
+api/jobs.py      in-memory queue for links shared from the phone (POST /api/ingest)
+ios/             Xcode project: Cookbook app, CookingActivity (Live Activity), AddToCookbook (share
+                 extension), Shared/ (both app and widget), tools/ + Art/ (cook flipbook font)
 docs/ios/        iOS app runbook and API contract
 web/             Next.js (App Router) + Tailwind v4 + Framer Motion frontend; proxies /api to :8000
 pipeline/        downloader, transcriber, parser, ingest, urls, ocr, webrecipe, thumbnails
@@ -154,6 +159,10 @@ cd web; npm run dev                      # web app on :3000 (also .claude/launch
   `ingredient_sources`. `list`/`show`/`ingest` label them; `pipeline/urls.py::recipe_link` and
   `points_elsewhere` find the caption's external recipe link or hint (`show` also prints
   "Full recipe:" for normal recipes). Pantry search never returns them (no ingredient rows).
+  The iPhone app relabels them (`PATCH /api/recipes/{id} {"status"}`, `db.set_status`, never
+  for rows with ingredients): "Save for later" = `needs_recipe` (its 🔖 list), "Remove" =
+  `not_recipe`. "Check again" re-ingests with `refresh`; a `needs_recipe` post that still
+  has no list stays `needs_recipe` instead of being re-classified.
 - **Caption failures** (e.g. YouTube 429) trigger a retry without captions rather than failing.
 - **Pantry staples** (`RECIPE_PANTRY_STAPLES`: salt, black pepper, water, oil) are excluded from
   scoring entirely, not counted as matched.
@@ -170,15 +179,42 @@ cd web; npm run dev                      # web app on :3000 (also .claude/launch
   card is off screen past the hero, or while a step timer runs; it shares the recipe page's
   progress handlers (`selectStep`, `completeStep`) with `CookingMode`, never its own state.
   Timers come from the step's wording (`lib/stepTimer.ts`: "28-32 minutes" -> 28 min).
-- **iOS Live Activity** (`web/native/ios/`, see its README; not compiled yet, no Xcode
-  project in the repo). The web side only feeds the active step to the Capacitor plugin
-  (`lib/useLiveActivity.ts` -> `LiveActivityManager.setSession`); the native side starts the
-  activity on resign-active/background and ends it `.immediate` on foreground/become-active,
-  because JS may be suspended. Starting must happen before `didEnterBackground` (iOS refuses
-  requests from the background). The "Dynamic Island" switch (`LiveActivityToggle`,
-  localStorage `liveActivity:autoStart`) disables auto-start; "End cooking session" ends all
-  activities and suppresses the session until the step or timer changes. In a browser every
-  bridge call is a no-op (`liveActivitySupported()`).
+- **Web app's Capacitor Live Activity** (`web/native/ios/`, `lib/useLiveActivity.ts`,
+  `LiveActivityToggle`) was never compiled and is superseded by the native app below; it can
+  be removed. In a browser every bridge call is a no-op.
+- **Native iOS app** (`ios/`; built and run on the iPhone, never a Simulator: see Environment).
+  - Feed: the search box also takes "what you have" (ingredient chips -> `/api/pantry`
+    re-ranks the feed; no separate Pantry tab, the user's choice). Filters All / ❤️ /
+    👌🎉 (the API's `tried`, shown as "Cooked" everywhere) / 🔖 (`?status=todo`). Filter
+    switches don't animate: animating the feed or a sliding pill stuttered on the phone.
+  - Thumbnails (`Views/Thumbnail.swift`) are decoded at their drawn size off the main thread
+    and cached in memory; photos come from URLCache once downloaded (offline too).
+  - Offline (`Store/OfflineStore.swift`): the feed, 🔖 list and every recipe are saved as JSON
+    and shown first; the PC being out of reach keeps them with an "Offline" tag. API calls
+    time out after 8 s. Marks, ingredient search and Check again need the PC.
+  - Cooking progress (step in focus, done steps, the step timer) lives on the phone
+    (`Shared/CookingProgress.swift`, UserDefaults), shared with the Live Activity.
+  - Live Activity (`CookingActivity/`): starts on "Watch on Instagram", or on leaving a recipe
+    (`.inactive`; iOS refuses requests once in the background) if Settings' switch is on;
+    ends whenever the app is active again. iOS collapses the expanded island by itself, so a
+    silent alert (`Resources/silence.caf`) re-opens it on start and on every ‹ › tap.
+    ‹ › run `ChangeStepIntent` (a LiveActivityIntent, so in the app's process: no App Group
+    needed). Keep the Lock Screen card and expanded island under ~160 pt, or iOS crops them.
+    Island text prefers the server's `short_text`, else `Step.islandText`'s regex shortening.
+  - The corner cook "animation": Live Activities can't animate, so `CookFlip.ttf`'s digits
+    are 10 outline frames and the widget shows a self-updating `Text(timerInterval:)` in it,
+    right-aligned and cropped to the seconds digit (1 frame/s). Rebuild with
+    `ios/tools/draw_cook_frames.swift` -> `ios/Art/cook-frames/*.svg` ->
+    `ios/tools/make_flipbook_font.py`. The cook is an original drawing: don't copy existing
+    characters (the user asked for old-school anime style, not Dragon Ball characters).
+  - Share sheet (`AddToCookbook/`): posts the link to `POST /api/ingest`; the PC's queue
+    (`api/jobs.py`) runs one job at a time with `ingest_url(..., skip_existing=True)`, in
+    memory (a uvicorn restart drops queued jobs). The feed polls `GET /api/ingest` and shows
+    "Adding..." cards. The extension can't read the app's Settings (no App Group on a free
+    Apple ID), so its server address is hard-coded: keep it in sync with
+    `APIClient.defaultServerURL` (`http://192.168.2.23:8000`; give the PC that address with a
+    DHCP reservation so it doesn't change).
+  - Free Apple ID signing: the app must be re-installed every 7 days.
 - Downloaded media is deleted after ingest unless `RECIPE_KEEP_MEDIA=true`.
 
 ## Environment Notes (this machine)
