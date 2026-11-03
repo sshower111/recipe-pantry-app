@@ -21,7 +21,9 @@ private network such as Tailscale is the later option.
 
 The code is on GitHub. **The data is not**, and must never be committed (the repo is public).
 
-1. Merge PR #1 (`web-app`) on GitHub, or clone that branch on the Mac.
+1. Nothing to merge: `main` stays the published web version. The iOS work lives on the
+   **`ios-app`** branch (this runbook, `api.md`, and the pantry/ingredients endpoints) and
+   goes back to `main` as a pull request once the native app is built.
 2. Stop the API server (Ctrl+C), then export the database **as one file**. Most recent writes
    (e.g. the `reparse` that added steps) sit in `recipes.db-wal`; copying only `recipes.db`
    silently loses them:
@@ -49,7 +51,7 @@ The code is on GitHub. **The data is not**, and must never be committed (the rep
    ```
 3. **Project**:
    ```bash
-   git clone https://github.com/sshower111/recipe-pantry-app.git && cd recipe-pantry-app
+   git clone -b ios-app https://github.com/sshower111/recipe-pantry-app.git && cd recipe-pantry-app
    python3.12 -m venv .venv && source .venv/bin/activate
    pip install -r requirements-dev.txt          # + requirements-ocr.txt if you want OCR
    mkdir -p data && cp <copied>/recipes-export.db data/recipes.db
@@ -218,6 +220,7 @@ Dynamic Island while the reel plays.
 
 Paste after sections 1 to 4 are done (data moved, server running, empty Xcode project builds):
 
+> We're on the `ios-app` branch; keep all work there (`main` is the published web version).
 > Read `CLAUDE.md`, `docs/ios/README.md` and `docs/ios/api.md`. First update CLAUDE.md's
 > environment notes for this Mac and fix `.claude/launch.json` for macOS. Then build the
 > native SwiftUI app in `ios/` following the build order in section 7, one step at a time:
