@@ -255,8 +255,9 @@ def test_shorten_steps_retries_on_wrong_count_and_cleans(monkeypatch):
     steps = ["In a bowl, mix together hoisin sauce, bean sauce, sugar and ginger powder.",
              "Bake at 170°C for 40-45 minutes until cooked through.", "Stir."]
     answers = iter([
-        json.dumps({"short_steps": ["Mix the sauce ingredients"]}),
-        json.dumps({"short_steps": ["Mix the sauce ingredients.", "Bake at 170°C for 40-45 min", "Stir well now"]}),
+        json.dumps({"step_1": "Mix the sauce ingredients"}),
+        json.dumps({"step_1": "Mix the sauce ingredients.", "step_2": "Bake at 170°C for 40-45 min",
+                    "step_3": "Stir well now"}),
     ])
     sent = []
 
@@ -269,7 +270,7 @@ def test_shorten_steps_retries_on_wrong_count_and_cleans(monkeypatch):
     # Trailing period dropped; a "short" version longer than the step is not kept.
     assert shorts == ["Mix the sauce ingredients", "Bake at 170°C for 40-45 min", None]
     assert len(sent) == 2
-    assert sent[0]["format"]["required"] == ["short_steps"]
+    assert sent[0]["format"]["required"] == ["step_1", "step_2", "step_3"]
     assert sent[0]["think"] is False and sent[0]["options"]["temperature"] == 0
     user = sent[0]["messages"][1]["content"]
     assert "- hoisin sauce" in user and "STEPS (3):\n1. In a bowl" in user
@@ -277,9 +278,9 @@ def test_shorten_steps_retries_on_wrong_count_and_cleans(monkeypatch):
 
 def test_shorten_steps_gives_up_after_retries(monkeypatch):
     monkeypatch.setattr(parser.requests, "post",
-                        lambda url, json, timeout: FakeResponse('{"short_steps": []}'))
-    with pytest.raises(parser.OllamaError, match="0 short steps for 1 steps"):
-        parser.shorten_steps(["Stir the pot."])
+                        lambda url, json, timeout: FakeResponse('{"step_1": "Stir"}'))
+    with pytest.raises(parser.OllamaError, match="step_2"):
+        parser.shorten_steps(["Stir the pot.", "Serve it hot."])
     assert parser.shorten_steps([]) == []
 
 

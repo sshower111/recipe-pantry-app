@@ -134,8 +134,8 @@ cd web; npm run dev                      # web app on :3000 (also .claude/launch
   page imported before (pages stored before steps existed lack instructions).
 - **Short steps.** `recipe_steps.short_text` is a ~50-character version of each step for the
   iOS Dynamic Island / Lock Screen ("Mix the sauce ingredients"), from a second, small model
-  call (`parser.shorten_steps`: steps + ingredient names only, one short version per step,
-  retried on a wrong count). Ingest and `reparse` run it after the parse; failures are logged
+  call (`parser.shorten_steps`: steps + ingredient names only). Its schema has one required
+  key per step (`step_1`, ...): with a plain list, qwen3.5:9b merged 10 steps into one item. Ingest and `reparse` run it after the parse; failures are logged
   and leave NULLs. `shorten-steps` fills stored recipes from their saved steps (ingredients
   untouched). A version that is empty or not shorter is stored NULL; the app then shortens `text`.
 - **Transcript choice:** use platform captions if ≥ 40 chars and `RECIPE_PREFER_CAPTIONS`, else

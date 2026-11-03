@@ -8,7 +8,7 @@ import re
 from typing import Any, Literal
 
 import requests
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, ValidationError, create_model, field_validator
 
 log = logging.getLogger(__name__)
 
@@ -64,17 +64,6 @@ class ParsedRecipe(BaseModel):
         if isinstance(value, str) and not value.strip():
             return None
         return value
-
-
-class ShortSteps(BaseModel):
-    # One island version per step, same order and count as the steps sent.
-    short_steps: list[str]
-
-    @classmethod
-    def output_schema(cls) -> dict[str, Any]:
-        schema = cls.model_json_schema()
-        schema["required"] = list(schema["properties"])
-        return schema
 
 
 class OllamaError(RuntimeError):
@@ -260,8 +249,8 @@ def parse_recipe(
 SHORTEN_PROMPT = """\
 You shorten recipe steps for a phone's lock screen, which fits about two short lines.
 
-You get the recipe's ingredient list and its numbered steps. Return JSON with
-"short_steps": exactly one short version per step, in the same order (N steps in, N out).
+You get the recipe's ingredient list and its numbered steps. Return JSON with one key per
+step, "step_1", "step_2", ...: the short version of that step only.
 
 Rules:
 - At most 50 characters each; plain English imperative ("Fold in the flour").
@@ -307,19 +296,19 @@ def shorten_steps(
         return []
     payload = build_payload(build_shorten_messages(list(steps), list(ingredients)),
                             model=model, num_ctx=num_ctx, think=think)
-    payload["format"] = ShortSteps.output_schema()
+    # One required key per step: a plain list let the model merge all the steps into one item.
+    keys = [f"step_{n}" for n in range(1, len(steps) + 1)]
+    answer = create_model("ShortSteps", **{key: (str, ...) for key in keys})
+    payload["format"] = answer.model_json_schema()
 
-    last_error: Exception | str | None = None
+    last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
         content = call_ollama(payload, base_url=base_url, timeout=timeout)
         try:
-            shorts = ShortSteps.model_validate_json(content).short_steps
-        except (ValidationError, json.JSONDecodeError) as exc:
+            shorts = answer.model_validate_json(content)
+        except ValidationError as exc:
             log.warning("Attempt %d: short steps failed validation: %s", attempt, exc)
             last_error = exc
             continue
-        if len(shorts) == len(steps):
-            return [_clean_short(short, step) for short, step in zip(shorts, steps)]
-        last_error = f"{len(shorts)} short steps for {len(steps)} steps"
-        log.warning("Attempt %d: %s", attempt, last_error)
+        return [_clean_short(getattr(shorts, key), step) for key, step in zip(keys, steps)]
     raise OllamaError(f"Short steps never validated: {last_error}")
