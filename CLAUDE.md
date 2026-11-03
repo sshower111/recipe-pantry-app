@@ -185,10 +185,10 @@ everything):
   to `api/` or `db/` reach it via git (push here, pull there, restart uvicorn).
 - **MacBook Air (Apple M1, 16 GB) = development client only.** Xcode, Claude Code, git,
   pytest. Do **not** run Ollama models, the pipeline, `uvicorn` or iOS Simulators here. Build
-  the iOS app for and run it on the physical iPhone (`xcodebuild ... -destination
-  'generic/platform=iOS'`, then `xcrun devicectl device install app`); the user checks the
-  screen, since Claude's simulator tools don't reach a real device. Keep background processes
-  to a minimum.
+  the iOS app for and run it on the physical iPhone (`xcodebuild ... -configuration Release
+  -destination 'id=<udid>'`, then `xcrun devicectl device install app`); Debug builds made
+  SwiftUI noticeably laggy on the phone. The user checks the screen, since Claude's simulator
+  tools don't reach a real device. Keep background processes to a minimum.
 - Mac details: macOS 27, default shell bash, Homebrew `python@3.12` (`python3.12`), venv at
   `.venv/` (enough for pytest), Xcode 27. `node@22` is keg-only: `~/.bash_profile` adds
   `/opt/homebrew/opt/node@22/bin` to PATH. Ollama is installed but should stay idle. The

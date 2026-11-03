@@ -171,7 +171,7 @@ struct CookingModeView: View {
                 .foregroundStyle(Color.muted)
             if !tried {
                 Button(action: onMarkTried) {
-                    Text("Mark as tried")
+                    Text("Mark as cooked")
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 20)

@@ -134,7 +134,7 @@ struct RecipeDetailView: View {
     private func hero(_ recipe: Recipe) -> some View {
         Color.sandSoft
             .aspectRatio(4 / 5, contentMode: .fit)
-            .overlay { Thumbnail(url: store.thumbnailURL(recipe.thumbnailUrl), title: recipe.title, initialSize: 96) }
+            .overlay { Thumbnail(url: store.thumbnailURL(recipe.thumbnailUrl), title: recipe.title, initialSize: 96, maxPoints: 500) }
             .clipShape(.rect(cornerRadius: 32))
             .padding(.horizontal, 12)
     }
@@ -199,7 +199,7 @@ struct RecipeDetailView: View {
         Button {
             Task { await store.toggle(.tried, for: recipeId) }
         } label: {
-            Label(recipe.tried ? "Tried it" : "Mark as tried", systemImage: "checkmark")
+            Label(recipe.tried ? "Cooked it" : "Mark as cooked", systemImage: "checkmark")
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(recipe.tried ? Color.terracotta : Color.ink)
                 .padding(.horizontal, 16)

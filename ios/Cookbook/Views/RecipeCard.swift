@@ -5,6 +5,8 @@ import SwiftUI
 struct RecipeCard: View {
     let recipe: RecipeSummary
     let thumbnailURL: URL?
+    /// Set when the feed is ranked by picked ingredients: shows what's used and missing.
+    var match: PantryMatch?
     let onToggleFavorite: () -> Void
 
     private var meta: String {
@@ -31,16 +33,32 @@ struct RecipeCard: View {
                     .foregroundStyle(Color.ink)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
-                Text(meta)
-                    .font(.subheadline)
-                    .foregroundStyle(Color.muted)
+                if let match {
+                    Text(match.missingCount == 0
+                         ? "Uses \(match.matched) of yours · nothing else needed"
+                         : "Uses \(match.matched) of yours · needs \(match.missingCount) more")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(match.missingCount == 0 ? Color.terracotta : Color.ink)
+                    if !match.missing.isEmpty {
+                        Text("Missing: " + match.missing.joined(separator: ", "))
+                            .font(.footnote)
+                            .foregroundStyle(Color.muted)
+                            .lineLimit(1)
+                    }
+                } else {
+                    Text(meta)
+                        .font(.subheadline)
+                        .foregroundStyle(Color.muted)
+                }
                 if recipe.yieldLabel != nil || recipe.tried {
                     HStack(spacing: 6) {
                         if let yieldLabel = recipe.yieldLabel {
                             Pill(text: yieldLabel)
                         }
                         if recipe.tried {
-                            Pill(text: "Tried", systemImage: "checkmark", foreground: .terracotta, background: .terracottaSoft)
+                            // Same emoji as the Cooked filter chip.
+                            Pill(text: "👌🎉", foreground: .terracotta, background: .terracottaSoft)
+                                .accessibilityLabel("Cooked")
                         }
                     }
                 }
@@ -73,7 +91,7 @@ struct RecipeCard: View {
     }
 }
 
-/// Small rounded label: a yield ("serves 4") or a status ("Tried").
+/// Small rounded label: a yield ("serves 4") or a status ("Cooked").
 struct Pill: View {
     let text: String
     var systemImage: String?
