@@ -18,8 +18,9 @@ enum APIError: LocalizedError {
 struct APIClient {
     /// UserDefaults / @AppStorage key for the server address set in Settings.
     static let serverURLKey = "serverURL"
-    /// The Simulator shares the Mac's network; a real iPhone needs `http://<mac>.local:8000`.
-    static let defaultServerURL = "http://localhost:8000"
+    /// The Windows PC that runs the backend (docs/ios/README.md, section 3); the Settings
+    /// screen can change it. Keep the PC on this address with a DHCP reservation.
+    static let defaultServerURL = "http://192.168.2.23:8000"
 
     let baseURL: URL
     var session: URLSession = .shared
