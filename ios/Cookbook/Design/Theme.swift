@@ -19,6 +19,7 @@ extension Color {
     static let muted = Color(hex: 0x8A817A)
     static let heart = Color(hex: 0xB0272B)           // filled favorite heart (deeper than terracotta)
     static let heartOutline = Color(hex: 0x9A9089)    // empty heart: a touch lighter than muted
+    static let softWhite = Color(hex: 0xF3EFEA)       // icons over photos: warm, not pure white
 }
 
 extension Font {

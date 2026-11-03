@@ -26,9 +26,15 @@ struct CookbookApp: App {
             switch phase {
             // Back in the app (including at launch): the Live Activity has done its job.
             case .active: Task { await LiveActivityController.endAll() }
-            // Just left for the video: show the expanded island once.
-            case .background: Task { await LiveActivityController.announce() }
-            default: break
+            // Leaving: start while iOS still allows it (it refuses once in the background).
+            case .inactive: Task { await LiveActivityController.startOnLeave() }
+            // Try again in case `.inactive` was missed; after Watch, show the expanded island once.
+            case .background:
+                Task {
+                    await LiveActivityController.startOnLeave()
+                    await LiveActivityController.announce()
+                }
+            @unknown default: break
             }
         }
     }

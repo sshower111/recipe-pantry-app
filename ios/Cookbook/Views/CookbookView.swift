@@ -4,6 +4,7 @@ import SwiftUI
 struct CookbookView: View {
     @Environment(RecipeStore.self) private var store
     @State private var path: [Int] = []
+    @State private var showSettings = false
     @State private var filter = Filter.all
     @State private var query = ""
     @Namespace private var chips
@@ -49,6 +50,7 @@ struct CookbookView: View {
             .navigationDestination(for: Int.self) { RecipeDetailView(recipeId: $0) }
         }
         .task { if store.recipes == nil { await store.load() } }
+        .sheet(isPresented: $showSettings) { SettingsView() }
         // cookbook://recipe/<id>, from tapping the Live Activity: show that recipe at its step.
         .onOpenURL { url in
             guard url.scheme == "cookbook", url.host() == "recipe", let id = Int(url.lastPathComponent) else { return }
@@ -59,9 +61,18 @@ struct CookbookView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Cookbook")
-                .font(.serifTitle(46))
-                .foregroundStyle(Color.ink)
+            HStack(alignment: .center) {
+                Text("Cookbook")
+                    .font(.serifTitle(46))
+                    .foregroundStyle(Color.ink)
+                Spacer()
+                Button("Settings", systemImage: "gearshape") { showSettings = true }
+                    .labelStyle(.iconOnly)
+                    .font(.system(size: 20))
+                    .foregroundStyle(Color.muted)
+                    .frame(width: 44, height: 44)
+                    .contentShape(.rect)
+            }
             Text(store.recipes.map { "\($0.count) recipes saved from your reels" } ?? "Your saved recipes, all in one place")
                 .foregroundStyle(Color.muted)
         }

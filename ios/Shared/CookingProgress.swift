@@ -95,10 +95,17 @@ struct ChangeStepIntent: LiveActivityIntent {
         var progress = CookingStorage.progress(for: recipeId)
         progress.active = min(max(progress.active + offset, 0), snapshot.steps.count - 1)
         CookingStorage.setProgress(progress, for: recipeId)
-        let content = ActivityContent(state: snapshot.state(at: progress.active, timer: CookingStorage.timer),
-                                      staleDate: nil)
+        let state = snapshot.state(at: progress.active, timer: CookingStorage.timer)
+        let content = ActivityContent(state: state, staleDate: nil)
+        // iOS shrinks the expanded island by itself after a few seconds and offers no way to
+        // keep it open. A (silent) alert re-opens it, so it stays open while the cook keeps
+        // tapping ‹ ›; it still shrinks a few seconds after the last tap.
+        let alert = AlertConfiguration(
+            title: "Step \(state.currentStepIndex + 1)/\(state.totalSteps)",
+            body: "\(state.instructionText)",
+            sound: .named("silence.caf"))  // in the app bundle; this runs in the app's process
         for activity in Activity<CookingActivityAttributes>.activities where activity.attributes.recipeId == recipeId {
-            await activity.update(content)
+            await activity.update(content, alertConfiguration: alert)
         }
         return .result()
     }

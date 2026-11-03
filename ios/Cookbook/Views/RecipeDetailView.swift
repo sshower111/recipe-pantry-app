@@ -56,18 +56,24 @@ struct RecipeDetailView: View {
                         Image(systemName: recipe.favorite ? "heart.fill" : "heart")
                             .symbolRenderingMode(.monochrome)
                             .fontWeight(.medium)
-                            .foregroundStyle(recipe.favorite ? Color.heart : Color.heartOutline)
+                            .foregroundStyle(recipe.favorite ? Color.heart : Color.softWhite)
+                            .shadow(color: .black.opacity(0.3), radius: 1.5, y: 0.5)  // readable on light photos
                             .symbolEffect(.bounce, value: recipe.favorite)
                     }
-                    .tint(recipe.favorite ? Color.heart : Color.heartOutline)
+                    .tint(recipe.favorite ? Color.heart : Color.softWhite)
                     .accessibilityLabel(recipe.favorite ? "Remove from favorites" : "Add to favorites")
                     .sensoryFeedback(.selection, trigger: recipe.favorite)
                 }
             }
         }
-        .tint(.ink)
+        // The system back arrow takes the tint: soft white over the photo, like the heart.
+        .tint(.softWhite)
         // Refresh on every visit (steps may have been re-parsed on the PC); cached copy shows meanwhile.
         .task { await load() }
+        // Back to the cookbook: leaving the app no longer starts the island for this recipe.
+        .onDisappear {
+            if LiveActivityController.onScreen?.id == recipeId { LiveActivityController.onScreen = nil }
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { session?.reload() }
         }
@@ -86,6 +92,7 @@ struct RecipeDetailView: View {
     /// One session per visit; a fresh one only if a re-parse on the PC changed the steps.
     private func updateSession() {
         guard let recipe = store.details[recipeId] else { return }
+        LiveActivityController.onScreen = recipe
         if let session, session.steps == recipe.steps {
             session.reload()
         } else {
