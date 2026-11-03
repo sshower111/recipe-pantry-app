@@ -35,7 +35,7 @@ def create_app(db_path: str | Path, thumbnails_dir: Path) -> FastAPI:
     app = FastAPI(title="Recipe Pantry API")
 
     def db() -> Iterator[sqlite3.Connection]:
-        conn = connect(db_path)
+        conn = connect(db_path, check_same_thread=False)
         try:
             yield conn
         finally:

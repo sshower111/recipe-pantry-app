@@ -1,9 +1,27 @@
 # Recipe Pantry
 
-A local pipeline that turns cooking shorts and reels into structured recipes and
-tells you what you can cook with what's in your pantry. Everything runs on your machine.
-A mobile-first web app ([Web app](#web-app)) lets you browse the recipes and cook along
-step by step, with the video beside you.
+Turns the cooking reels you save into real recipes, then lets you cook along step by step.
+Paste an Instagram, YouTube or TikTok link: the app transcribes it, reads the on-screen text
+and the creator's recipe page if needed, and a **local LLM** extracts the ingredients and
+method. No cloud APIs: everything runs on your own machine.
+
+<p align="center">
+  <img src="docs/screenshots/cooking.gif" width="260" alt="Cooking mode: finishing steps, then the Dynamic Island-style step bar">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/cookbook.png" width="200" alt="Cookbook list with video thumbnails">
+  <img src="docs/screenshots/recipe.png" width="200" alt="Recipe page with hero image">
+  <img src="docs/screenshots/cooking.png" width="200" alt="Step-by-step cooking mode showing only that step's ingredients">
+  <img src="docs/screenshots/island.png" width="200" alt="Expanded step bar with ingredients and Next button">
+</p>
+
+**Tech:** Python · yt-dlp · faster-whisper · EasyOCR · Ollama (local LLM, JSON-schema output) ·
+SQLite · FastAPI · Next.js · Tailwind · Framer Motion · pytest (214 tests)
+
+**In use:** 115 saved posts processed, 89 turned into recipes with ingredients, most with
+step-by-step methods. Recipe thumbnails and text belong to their creators, credited on each
+recipe page. A mobile-first web app ([Web app](#web-app)) is the cooking interface.
 
 ```
 URL ──yt-dlp──► metadata + captions + audio
