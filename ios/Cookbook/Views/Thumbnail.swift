@@ -54,7 +54,10 @@ struct Thumbnail: View {
             return
         }
         do {
-            let (data, _) = try await URLSession.shared.data(from: url)  // URLCache keeps the file
+            // Photos rarely change: once downloaded, URLCache (200 MB on disk) serves them,
+            // which also keeps them working offline.
+            let request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 8)
+            let (data, _) = try await URLSession.shared.data(for: request)
             let decoded = await Task.detached(priority: .userInitiated) {
                 ThumbnailCache.downsample(data, maxPixels: pixels)
             }.value

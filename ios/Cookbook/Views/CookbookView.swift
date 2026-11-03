@@ -88,6 +88,9 @@ struct CookbookView: View {
                         pickedChips.padding(.top, 14)
                     }
                     filterChips.padding(.top, 14)
+                    if !store.ingestJobs.isEmpty {
+                        sharedPosts.padding(.top, 20)
+                    }
                     content.padding(.top, 24)
                 }
                 .padding(.horizontal, 16)
@@ -105,6 +108,7 @@ struct CookbookView: View {
         }
         .task { if store.recipes == nil { await store.load() } }
         .task { await loadIngredients() }
+        .task { await store.watchIngestJobs() }
         // Re-rank whenever the picks change (a short pause first, for quick taps).
         .task(id: savedPicks) {
             try? await Task.sleep(for: .milliseconds(200))
@@ -136,6 +140,17 @@ struct CookbookView: View {
             }
             Text(subtitle)
                 .foregroundStyle(Color.muted)
+            if let offlineSince = store.offlineSince {
+                // The PC is out of reach: everything shown is the phone's saved copy.
+                Label("Offline · saved \(offlineSince.formatted(.relative(presentation: .named)))",
+                      systemImage: "icloud.slash")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(Color.muted)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color.sandSoft, in: .capsule)
+                    .padding(.top, 2)
+            }
         }
     }
 
@@ -275,6 +290,67 @@ struct CookbookView: View {
         .scrollClipDisabled()
     }
 
+    /// Posts shared from the share sheet: being added on the PC, or just finished.
+    private var sharedPosts: some View {
+        VStack(spacing: 10) {
+            ForEach(store.ingestJobs) { job in
+                if job.status == "done", let id = job.recipeId, job.recipeStatus == "ready" {
+                    NavigationLink(value: id) { jobRow(job) }
+                        .buttonStyle(.plain)
+                } else {
+                    jobRow(job)
+                }
+            }
+        }
+    }
+
+    private func jobRow(_ job: IngestJob) -> some View {
+        let source = URL(string: job.url)?.host()?.replacing("www.", with: "") ?? "a link"
+        let (title, detail): (String, String) = switch (job.status, job.result, job.recipeStatus) {
+        case ("queued", _, _): ("Waiting to add from \(source)", "Your PC adds shared posts one at a time.")
+        case ("running", _, _): ("Adding from \(source)…", "Your PC is reading the video. A couple of minutes.")
+        case ("failed", _, _): ("Couldn't add a post from \(source)", job.message ?? "The PC couldn't read it.")
+        case (_, "skipped", _): ("Already saved: \(job.title ?? source)", "It's in your cookbook.")
+        case (_, _, "ready"): ("Added: \(job.title ?? "new recipe")", "Tap to open it.")
+        case (_, _, "needs_recipe"): ("Saved without a recipe: \(job.title ?? source)",
+                                      "The post points to a blog or bio link; add it on the PC with import-page.")
+        default: ("Not a recipe: \(job.title ?? source)", "No ingredient list in that post.")
+        }
+        return HStack(alignment: .top, spacing: 12) {
+            Group {
+                if job.isActive {
+                    ProgressView().tint(Color.terracotta)
+                } else {
+                    Image(systemName: job.status == "failed" ? "exclamationmark.triangle" : "checkmark.circle")
+                        .foregroundStyle(Color.terracotta)
+                }
+            }
+            .frame(width: 22, height: 22)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Color.ink)
+                    .lineLimit(2)
+                Text(detail)
+                    .font(.footnote)
+                    .foregroundStyle(Color.muted)
+                    .lineLimit(3)
+            }
+            Spacer(minLength: 0)
+            if !job.isActive {
+                Button("Dismiss", systemImage: "xmark") { store.dismissJob(job.id) }
+                    .labelStyle(.iconOnly)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Color.muted)
+                    .frame(width: 28, height: 28)
+                    .contentShape(.rect)
+            }
+        }
+        .padding(14)
+        .background(Color.terracottaSoft.opacity(0.6), in: .rect(cornerRadius: 18))
+        .overlay { RoundedRectangle(cornerRadius: 18).strokeBorder(Color.terracotta.opacity(0.35)) }
+    }
+
     @ViewBuilder
     private var content: some View {
         let shown = shown
@@ -289,7 +365,9 @@ struct CookbookView: View {
                 }
             }
         } else if !picks.isEmpty, let pantryError, matches == nil {
-            errorBox("Couldn't search by ingredient (\(pantryError)).") { Task { await searchPantry() } }
+            errorBox(store.offlineSince != nil
+                     ? "Searching by ingredient needs the PC, which is out of reach right now."
+                     : "Couldn't search by ingredient (\(pantryError)).") { Task { await searchPantry() } }
         } else if shown.isEmpty {
             Text(emptyMessage)
                 .foregroundStyle(Color.muted)

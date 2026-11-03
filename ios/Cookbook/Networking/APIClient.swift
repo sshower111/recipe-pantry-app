@@ -64,6 +64,11 @@ struct APIClient {
         return try await get("api/pantry", query: query)
     }
 
+    /// Posts shared from the phone and being added on the PC, newest first.
+    func ingestJobs() async throws -> [IngestJob] {
+        try await get("api/ingest")
+    }
+
     /// `thumbnail_url` is a path on the server, e.g. `/api/recipes/1/thumbnail`.
     func absoluteURL(_ path: String?) -> URL? {
         guard let path else { return nil }
@@ -77,6 +82,10 @@ struct APIClient {
     }
 
     private func send<T: Decodable>(_ request: URLRequest) async throws -> T {
+        var request = request
+        // Away from home the PC simply doesn't answer; give up quickly (the default is 60 s)
+        // so the saved copy stays useful instead of a spinner.
+        request.timeoutInterval = 8
         let (data, response) = try await session.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {

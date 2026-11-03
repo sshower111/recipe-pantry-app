@@ -75,3 +75,19 @@ nonisolated struct PantryMatch: Codable, Identifiable {
     let have: [String]
     let missing: [String]
 }
+
+/// A post shared from the phone, being added on the PC (POST/GET /api/ingest).
+nonisolated struct IngestJob: Codable, Identifiable, Hashable {
+    let id: String
+    let url: String
+    let status: String              // queued | running | done | failed
+    let createdAt: String
+    let finishedAt: String?
+    let recipeId: Int?
+    let title: String?
+    let result: String?             // added | updated | skipped
+    let recipeStatus: String?       // ready | needs_recipe | not_recipe
+    let message: String?
+
+    var isActive: Bool { status == "queued" || status == "running" }
+}

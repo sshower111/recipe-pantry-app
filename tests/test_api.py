@@ -104,3 +104,63 @@ def test_pantry_ranks_and_skips_staples(client, tmp_path):
 def test_ingredients_counts_ready_recipes_only(client):
     names = {i["name"]: i["recipe_count"] for i in client.get("/api/ingredients").json()}
     assert names == {"butter": 1, "garlic": 1, "salt": 1, "shrimp": 1}
+
+
+def _ingest_client(tmp_path, ingest):
+    db_path = tmp_path / "jobs.db"
+    connect(db_path).close()
+    return TestClient(create_app(db_path, tmp_path, ingest=ingest))
+
+
+def test_ingest_job_runs_in_background(tmp_path):
+    import time
+    from types import SimpleNamespace
+
+    seen = []
+
+    def fake_ingest(url):
+        seen.append(url)
+        return SimpleNamespace(recipe_id=7, status="added", title="Garlic Noodles", recipe=None,
+                               recipe_status="ready", status_note=None)
+
+    client = _ingest_client(tmp_path, fake_ingest)
+    job = client.post("/api/ingest", json={"url": "Look! https://www.instagram.com/reel/ABC/?igsh=x."})
+    assert job.status_code == 202 and job.json()["status"] in ("queued", "running", "done")
+    # Wait for the worker, then read the finished job back.
+    for _ in range(100):
+        done = client.get(f"/api/ingest/{job.json()['id']}").json()
+        if done["status"] == "done":
+            break
+        time.sleep(0.02)
+    assert seen == ["https://www.instagram.com/reel/ABC/?igsh=x"]  # link pulled out of the text
+    assert (done["recipe_id"], done["title"], done["result"], done["recipe_status"]) == (7, "Garlic Noodles", "added", "ready")
+    assert [j["id"] for j in client.get("/api/ingest").json()] == [done["id"]]
+    assert client.get("/api/ingest/nope").status_code == 404
+
+
+def test_ingest_dedupes_running_jobs_and_reports_failures(tmp_path):
+    import threading
+    import time
+
+    release = threading.Event()
+
+    def slow_failing_ingest(url):
+        release.wait(2)
+        raise RuntimeError("yt-dlp: private video")
+
+    client = _ingest_client(tmp_path, slow_failing_ingest)
+    first = client.post("/api/ingest", json={"url": "https://www.instagram.com/reel/XYZ/"}).json()
+    again = client.post("/api/ingest", json={"url": "https://www.instagram.com/p/XYZ/?igsh=abc"}).json()
+    assert again["id"] == first["id"]  # same post (canonical URL) while still queued/running
+    release.set()
+    for _ in range(100):
+        job = client.get(f"/api/ingest/{first['id']}").json()
+        if job["status"] == "failed":
+            break
+        time.sleep(0.02)
+    assert job["status"] == "failed" and "private video" in job["message"]
+    assert client.post("/api/ingest", json={"url": "no link here"}).status_code == 422
+
+
+def test_ingest_off_without_pipeline(client):
+    assert client.post("/api/ingest", json={"url": "https://youtu.be/abc"}).status_code == 503

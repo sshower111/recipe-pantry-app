@@ -6,8 +6,9 @@ Run with ``uvicorn api.app:app --port 8000`` (the Next.js app in ``web/`` proxie
 
 from __future__ import annotations
 
+import re
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any, Literal
 
@@ -15,10 +16,12 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from api.jobs import IngestQueue
 from db import connect, find_recipes_by_pantry, get_recipe, list_recipes, match_step_ingredients, set_marks
-from pipeline.urls import embed_url
+from pipeline.urls import canonical_url, embed_url
 
 _STATUSES = {"ready": ["ready"], "todo": ["needs_recipe"], "all": None}
+_LINK = re.compile(r"https?://\S+")
 
 
 class Marks(BaseModel):
@@ -26,15 +29,27 @@ class Marks(BaseModel):
     tried: bool | None = None
 
 
+class IngestRequest(BaseModel):
+    # A link, or shared text containing one ("Check this out! https://vt.tiktok.com/...").
+    url: str
+
+
 def _video(source_url: str) -> dict[str, Any]:
     embed = embed_url(source_url)
     return {"url": source_url, "platform": embed[0] if embed else None, "embed_url": embed[1] if embed else None}
 
 
-def create_app(db_path: str | Path, thumbnails_dir: Path, staples: tuple[str, ...] = ()) -> FastAPI:
+def create_app(
+    db_path: str | Path,
+    thumbnails_dir: Path,
+    staples: tuple[str, ...] = (),
+    ingest: Callable[[str], Any] | None = None,
+) -> FastAPI:
     """``staples`` (salt, water, ...) are left out of pantry scoring unless a request
-    asks for them (``include_staples``)."""
+    asks for them (``include_staples``). ``ingest(url)`` runs one shared link through the
+    pipeline (returning a ``pipeline.ingest.IngestResult``); without it, /api/ingest is off."""
     app = FastAPI(title="Recipe Pantry API")
+    jobs = IngestQueue(ingest, key=canonical_url) if ingest else None
 
     def db() -> Iterator[sqlite3.Connection]:
         # FastAPI may run this dependency's setup and teardown on different threadpool
@@ -157,13 +172,59 @@ def create_app(db_path: str | Path, thumbnails_dir: Path, staples: tuple[str, ..
             raise HTTPException(404, "No thumbnail")
         return FileResponse(path, headers={"Cache-Control": "public, max-age=86400"})
 
+    # Adding recipes from the phone (share sheet): the job runs here in the background.
+    def ingest_jobs() -> IngestQueue:
+        if jobs is None:
+            raise HTTPException(503, "Adding recipes is not enabled on this server")
+        return jobs
+
+    @app.post("/api/ingest", status_code=202)
+    def queue_ingest(body: IngestRequest) -> dict[str, Any]:
+        link = _LINK.search(body.url)
+        if not link:
+            raise HTTPException(422, "No link found; share a post's link (https://...)")
+        return ingest_jobs().submit(link.group(0).rstrip(".,)")).to_json()
+
+    @app.get("/api/ingest")
+    def ingest_list() -> list[dict[str, Any]]:
+        return [job.to_json() for job in ingest_jobs().recent()]
+
+    @app.get("/api/ingest/{job_id}")
+    def ingest_job(job_id: str) -> dict[str, Any]:
+        job = ingest_jobs().get(job_id)
+        if job is None:
+            raise HTTPException(404, "Job not found")
+        return job.to_json()
+
     return app
+
+
+def _ingest_with_settings(url: str) -> Any:
+    """One shared link through the same pipeline as `main.py ingest --skip-existing`, on its
+    own connection (it runs on the queue's worker thread)."""
+    from config import settings
+    from db import backfill_status
+    from pipeline.ingest import ingest_url
+    from pipeline.urls import classify_missing_recipe
+
+    conn = connect(settings.db_path)
+    try:
+        result = ingest_url(url, conn, settings, skip_existing=True)
+        backfill_status(conn, classify_missing_recipe)  # label posts without a list, as the CLI does
+        row = conn.execute("SELECT status, title FROM recipes WHERE id = ?", (result.recipe_id,)).fetchone()
+        if row:
+            result.recipe_status = result.recipe_status or row[0]
+            result.title = result.title or row[1]
+        return result
+    finally:
+        conn.close()
 
 
 def _default_app() -> FastAPI:
     from config import settings
 
-    return create_app(settings.db_path, settings.data_dir / "thumbnails", settings.pantry_staples)
+    return create_app(settings.db_path, settings.data_dir / "thumbnails", settings.pantry_staples,
+                      ingest=_ingest_with_settings)
 
 
 app = _default_app()

@@ -43,6 +43,26 @@ and an uploader, but the schema allows null for both. 280 of 921 ingredient line
 | GET | `/api/recipes/{id}/thumbnail` | The image (JPEG/PNG/WebP); 404 if none |
 | GET | `/api/ingredients` | Canonical ingredient names used by ready recipes, most used first |
 | GET | `/api/pantry?have=a&have=b` | Recipes using what you have (repeat `have`); `limit`, `include_staples` |
+| POST | `/api/ingest` | `{"url": "<link or text containing one>"}`: queue a post to add; 202 with the job |
+| GET | `/api/ingest` | Recent jobs, newest first (in memory: a uvicorn restart clears them) |
+| GET | `/api/ingest/{job_id}` | One job; poll it until `status` is `done` or `failed` |
+
+**Adding recipes (share sheet).** The PC runs jobs one at a time on a background thread, the
+same pipeline as `main.py ingest --skip-existing` (a post already stored finishes at once with
+`result: "skipped"`). Sharing the same post again while its job is queued or running returns
+that job. A job looks like:
+
+```json
+{"id": "3f9c2a1b7d4e", "url": "https://www.instagram.com/reel/ABC/", "status": "done",
+ "created_at": "2026-11-03T20:15:02+00:00", "finished_at": "2026-11-03T20:17:10+00:00",
+ "recipe_id": 116, "title": "Garlic Noodles", "result": "added", "recipe_status": "ready",
+ "message": null}
+```
+
+`status`: `queued` | `running` | `done` | `failed` (`message` says why). `result`: `added` |
+`updated` | `skipped`. `recipe_status`: `ready` (has ingredients), `needs_recipe` (the post
+points elsewhere; `message` may say why the page failed) or `not_recipe`. 422 when the text has
+no link; 503 when the server runs without the pipeline (tests).
 
 Pantry search normalizes on the server ("2 large eggs" -> `egg`), so send what the user typed.
 Staples (salt, black pepper, water, oil) are ignored unless `include_staples=true`. Results
