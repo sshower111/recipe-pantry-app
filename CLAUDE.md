@@ -33,6 +33,9 @@ based on available pantry items. Everything runs locally: no cloud APIs.
      recipes using at least one selected ingredient, ranked by how many selected ingredients they
      use (most first), then fewest other ingredients (user's choice: "uses any, best first"; the
      CLI's `--max-missing` was dropped, the function keeps `max_missing` as an optional filter).
+4. **Native iOS app** (planned, built on a Mac): SwiftUI app in `ios/` (iOS 17+) reading the
+   FastAPI server over Wi-Fi, with a cooking-step Live Activity. Runbook: `docs/ios/README.md`;
+   JSON contract: `docs/ios/api.md` (regenerate its samples if API responses change).
 
 ## Layout
 
@@ -40,7 +43,8 @@ based on available pantry items. Everything runs locally: no cloud APIs.
 config.py        Settings dataclass from RECIPE_* env vars / .env (see .env.example)
 main.py          argparse CLI: init-db | ingest | batch | search | pantry | list | show | import-page |
                  renormalize | thumbnails
-api/app.py       FastAPI JSON server for the web app (create_app(db_path, thumbnails_dir))
+api/app.py       FastAPI JSON server for the web and iOS apps (create_app(db_path, thumbnails_dir, staples))
+docs/ios/        iOS app runbook and API contract
 web/             Next.js (App Router) + Tailwind v4 + Framer Motion frontend; proxies /api to :8000
 pipeline/        downloader, transcriber, parser, ingest, urls, ocr, webrecipe, thumbnails
 db/              schema, normalize, repository, pantry, step_ingredients
@@ -64,7 +68,7 @@ python main.py import-page <id> [--url <recipe page>] [--file saved.html|list.tx
 python main.py reparse <id> [<id> ...] | --missing-steps   # re-run the model on saved text
 python main.py renormalize [--dry-run]   # after normalizer/ALIASES edits
 python main.py thumbnails [--refresh]    # save video thumbnails to data/thumbnails/
-uvicorn api.app:app --port 8000          # API for the web app
+uvicorn api.app:app --port 8000          # API for the web app (add --host 0.0.0.0 for the iPhone)
 cd web; npm run dev                      # web app on :3000 (also .claude/launch.json "api"/"web")
 ```
 

@@ -210,7 +210,9 @@ New ingests save their thumbnail automatically. Favorite/tried marks live in the
 wording (`db/step_ingredients.py`), so a step like "combine wet and dry" shows none.
 API: `GET /api/recipes[?status=ready|todo|all]`, `GET /api/recipes/{id}`,
 `PATCH /api/recipes/{id}` (`{"favorite": true}` / `{"tried": true}`),
-`GET /api/recipes/{id}/thumbnail`. `next.config.ts` proxies `/api` to
+`GET /api/recipes/{id}/thumbnail`, `GET /api/ingredients`, `GET /api/pantry?have=a&have=b`.
+Full contract with sample responses: [docs/ios/api.md](docs/ios/api.md). A native iPhone app
+is planned: [docs/ios/README.md](docs/ios/README.md). `next.config.ts` proxies `/api` to
 `RECIPE_API_ORIGIN` (default `http://127.0.0.1:8000`).
 
 ## Configuration

@@ -11,11 +11,11 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from db import connect, get_recipe, list_recipes, match_step_ingredients, set_marks
+from db import connect, find_recipes_by_pantry, get_recipe, list_recipes, match_step_ingredients, set_marks
 from pipeline.urls import embed_url
 
 _STATUSES = {"ready": ["ready"], "todo": ["needs_recipe"], "all": None}
@@ -31,7 +31,9 @@ def _video(source_url: str) -> dict[str, Any]:
     return {"url": source_url, "platform": embed[0] if embed else None, "embed_url": embed[1] if embed else None}
 
 
-def create_app(db_path: str | Path, thumbnails_dir: Path) -> FastAPI:
+def create_app(db_path: str | Path, thumbnails_dir: Path, staples: tuple[str, ...] = ()) -> FastAPI:
+    """``staples`` (salt, water, ...) are left out of pantry scoring unless a request
+    asks for them (``include_staples``)."""
     app = FastAPI(title="Recipe Pantry API")
 
     def db() -> Iterator[sqlite3.Connection]:
@@ -95,6 +97,52 @@ def create_app(db_path: str | Path, thumbnails_dir: Path) -> FastAPI:
             raise HTTPException(404, "Recipe not found")
         return result
 
+    @app.get("/api/ingredients")
+    def ingredients(conn: sqlite3.Connection = Depends(db)) -> list[dict[str, Any]]:
+        """Canonical ingredient names used by ready recipes, most used first: what a pantry
+        picker can offer."""
+        return [
+            {"name": name, "recipe_count": count}
+            for name, count in conn.execute(
+                """
+                SELECT i.name, COUNT(DISTINCT ri.recipe_id) AS recipes
+                FROM ingredients i
+                JOIN recipe_ingredients ri ON ri.ingredient_id = i.id
+                JOIN recipes r ON r.id = ri.recipe_id AND r.status = 'ready'
+                GROUP BY i.id
+                ORDER BY recipes DESC, i.name
+                """
+            )
+        ]
+
+    @app.get("/api/pantry")
+    def pantry(
+        have: list[str] = Query(default=[], description="ingredients you have; repeat the parameter"),
+        limit: int | None = Query(default=None, ge=1),
+        include_staples: bool = False,
+        conn: sqlite3.Connection = Depends(db),
+    ) -> list[dict[str, Any]]:
+        """Recipes using at least one of ``have``, those using the most first, then the ones
+        needing the fewest other ingredients (same ranking as ``main.py pantry``)."""
+        matches = find_recipes_by_pantry(
+            conn, have, ignore_ingredients=() if include_staples else staples, limit=limit
+        )
+        thumbnails = dict(conn.execute("SELECT id, thumbnail_file FROM recipes"))
+        return [
+            {
+                "recipe_id": m.recipe_id,
+                "title": m.title,
+                "thumbnail_url": thumbnail_url({"id": m.recipe_id, "thumbnail_file": thumbnails.get(m.recipe_id)}),
+                "matched": m.matched,
+                "selected": m.selected,
+                "total": m.total,
+                "missing_count": m.missing_count,
+                "have": m.have,
+                "missing": m.missing,
+            }
+            for m in matches
+        ]
+
     @app.get("/api/recipes/{recipe_id}/thumbnail")
     def thumbnail(recipe_id: int, conn: sqlite3.Connection = Depends(db)) -> FileResponse:
         row = conn.execute("SELECT thumbnail_file FROM recipes WHERE id = ?", (recipe_id,)).fetchone()
@@ -109,7 +157,7 @@ def create_app(db_path: str | Path, thumbnails_dir: Path) -> FastAPI:
 def _default_app() -> FastAPI:
     from config import settings
 
-    return create_app(settings.db_path, settings.data_dir / "thumbnails")
+    return create_app(settings.db_path, settings.data_dir / "thumbnails", settings.pantry_staples)
 
 
 app = _default_app()

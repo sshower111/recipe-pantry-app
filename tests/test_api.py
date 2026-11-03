@@ -16,7 +16,7 @@ def client(tmp_path):
         source_url="https://www.instagram.com/p/ABC123/",
         title="Garlic Butter Shrimp",
         ingredients=[{"name": "shrimp", "amount": 1, "unit": "lb"}, {"name": "2 cloves garlic, minced"},
-                     {"name": "butter", "amount": 3, "unit": "tbsp"}],
+                     {"name": "butter", "amount": 3, "unit": "tbsp"}, {"name": "salt"}],
         steps=["Melt the butter.", "Add garlic and shrimp."],
         uploader="chef",
     )
@@ -27,7 +27,7 @@ def client(tmp_path):
     (thumbs / "1.jpg").write_bytes(b"\xff\xd8jpeg")
     set_thumbnail(conn, 1, "1.jpg")
     conn.close()
-    return TestClient(create_app(db_path, thumbs))
+    return TestClient(create_app(db_path, thumbs, staples=("salt",)))
 
 
 def test_list_defaults_to_ready(client):
@@ -64,3 +64,26 @@ def test_thumbnail_served(client):
     response = client.get("/api/recipes/1/thumbnail")
     assert response.status_code == 200 and response.content == b"\xff\xd8jpeg"
     assert client.get("/api/recipes/2/thumbnail").status_code == 404
+
+
+def test_pantry_ranks_and_skips_staples(client, tmp_path):
+    conn = connect(tmp_path / "recipes.db")
+    save_recipe(conn, source_url="https://x/eggs", title="Garlic Eggs",
+                ingredients=[{"name": "eggs"}, {"name": "garlic"}, {"name": "salt"}])
+    conn.close()
+    matches = client.get("/api/pantry", params={"have": ["Garlic", "2 large eggs", "salt"]}).json()
+    assert [(m["title"], m["matched"], m["missing"]) for m in matches] == [
+        ("Garlic Eggs", 2, []),
+        ("Garlic Butter Shrimp", 1, ["butter", "shrimp"]),
+    ]
+    assert matches[1]["thumbnail_url"] == "/api/recipes/1/thumbnail" and matches[0]["thumbnail_url"] is None
+    assert matches[0]["selected"] == 2  # salt is a staple
+    with_staples = client.get("/api/pantry", params={"have": ["salt"], "include_staples": True}).json()
+    assert {m["title"] for m in with_staples} == {"Garlic Eggs", "Garlic Butter Shrimp"}
+    assert client.get("/api/pantry", params={"have": ["garlic"], "limit": 1}).json()[0]["title"] == "Garlic Eggs"
+    assert client.get("/api/pantry").json() == []
+
+
+def test_ingredients_counts_ready_recipes_only(client):
+    names = {i["name"]: i["recipe_count"] for i in client.get("/api/ingredients").json()}
+    assert names == {"butter": 1, "garlic": 1, "salt": 1, "shrimp": 1}
