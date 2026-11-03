@@ -54,8 +54,8 @@ data/            gitignored: recipes.db and temporary downloads
 
 ## Commands
 
-```powershell
-.\.venv\Scripts\Activate.ps1          # Git Bash: source .venv/Scripts/activate
+```bash
+source .venv/bin/activate
 pip install -r requirements-dev.txt
 pytest                                # run from project root
 python main.py ingest <url> [<url> ...] [--skip-existing]
@@ -176,10 +176,16 @@ cd web; npm run dev                      # web app on :3000 (also .claude/launch
 
 ## Environment Notes (this machine)
 
-- Windows 11, Python 3.12, venv at `.venv/`. ffmpeg and Ollama are installed and on PATH.
+- MacBook Air (Apple M1), macOS 27, default shell bash. Homebrew `python@3.12` (run as
+  `python3.12`), venv at `.venv/`. ffmpeg, gh, git and Ollama (cask) installed via Homebrew;
+  Xcode installed.
+- `node@22` is keg-only: `~/.bash_profile` adds `/opt/homebrew/opt/node@22/bin` to PATH.
 - Installed Ollama models: `qwen3.5:9b` (thinking-capable). `qwen2.5:7b` (the code default) is
-  not pulled; the local `.env` sets `RECIPE_OLLAMA_MODEL=qwen3.5:9b` instead.
-- Whisper runs on CPU/int8 by default; GPU needs CUDA 12 cuBLAS + cuDNN 9.
+  not pulled; the local `.env` sets `RECIPE_OLLAMA_MODEL=qwen3.5:9b` instead. Ollama uses the
+  Apple GPU by itself.
+- Whisper runs on CPU/int8 (no CUDA on Macs).
+- Moved from the Windows PC on 2026-11-03 (215 tests pass, 89 ready recipes). Timings quoted
+  above ("~30-40s", "~2 min" per parse, OCR durations) were measured on that PC, not here.
 
 ## Not Yet Verified / Open Items
 
