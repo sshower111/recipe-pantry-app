@@ -11,7 +11,6 @@ import SwiftUI
 @main
 struct CookingActivityBundle: WidgetBundle {
     var body: some Widget {
-        CookingActivity()
         CookingActivityLiveActivity()
     }
 }

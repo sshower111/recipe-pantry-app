@@ -3,6 +3,7 @@ import SwiftUI
 /// The home feed: search, filter chips and recipe cards (web: app/page.tsx).
 struct CookbookView: View {
     @Environment(RecipeStore.self) private var store
+    @State private var path: [Int] = []
     @State private var filter = Filter.all
     @State private var query = ""
     @Namespace private var chips
@@ -29,7 +30,7 @@ struct CookbookView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     header
@@ -48,6 +49,12 @@ struct CookbookView: View {
             .navigationDestination(for: Int.self) { RecipeDetailView(recipeId: $0) }
         }
         .task { if store.recipes == nil { await store.load() } }
+        // cookbook://recipe/<id>, from tapping the Live Activity: show that recipe at its step.
+        .onOpenURL { url in
+            guard url.scheme == "cookbook", url.host() == "recipe", let id = Int(url.lastPathComponent) else { return }
+            if path.last != id { path = [id] }
+            store.stepToReveal = id
+        }
     }
 
     private var header: some View {

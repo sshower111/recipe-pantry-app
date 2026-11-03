@@ -11,6 +11,8 @@ final class RecipeStore {
     private(set) var error: String?
     /// Full recipes already opened, by id.
     private(set) var details: [Int: Recipe] = [:]
+    /// A recipe opened from the Live Activity; its screen scrolls to the current step, then clears this.
+    var stepToReveal: Int?
 
     func load() async {
         do {

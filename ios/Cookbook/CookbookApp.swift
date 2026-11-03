@@ -10,9 +10,10 @@ import SwiftUI
 @main
 struct CookbookApp: App {
     @State private var store = RecipeStore()
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
-        // Thumbnails come from the Mac; keep them on the phone between launches.
+        // Thumbnails come from the PC; keep them on the phone between launches.
         URLCache.shared = URLCache(memoryCapacity: 50_000_000, diskCapacity: 200_000_000)
     }
 
@@ -20,6 +21,15 @@ struct CookbookApp: App {
         WindowGroup {
             CookbookView()
                 .environment(store)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            // Back in the app (including at launch): the Live Activity has done its job.
+            case .active: Task { await LiveActivityController.endAll() }
+            // Just left for the video: show the expanded island once.
+            case .background: Task { await LiveActivityController.announce() }
+            default: break
+            }
         }
     }
 }

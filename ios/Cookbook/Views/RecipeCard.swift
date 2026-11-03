@@ -59,10 +59,12 @@ struct RecipeCard: View {
         Button(action: onToggleFavorite) {
             Image(systemName: recipe.favorite ? "heart.fill" : "heart")
                 .font(.system(size: 17))
-                .foregroundStyle(recipe.favorite ? Color.terracotta : Color.muted)
+                .symbolRenderingMode(.monochrome)
+                .foregroundStyle(recipe.favorite ? Color.heart : Color.heartOutline)
                 .symbolEffect(.bounce, value: recipe.favorite)
                 .frame(width: 36, height: 36)
                 .contentShape(.circle)
+                .overlay { HeartBurst(isFavorite: recipe.favorite) }
         }
         .buttonStyle(.plain)
         .padding(12)
