@@ -18,6 +18,7 @@ def client(tmp_path):
         ingredients=[{"name": "shrimp", "amount": 1, "unit": "lb"}, {"name": "2 cloves garlic, minced"},
                      {"name": "butter", "amount": 3, "unit": "tbsp"}, {"name": "salt"}],
         steps=["Melt the butter.", "Add garlic and shrimp."],
+        short_steps=[None, "Add garlic and shrimp"],
         uploader="chef",
     )
     save_recipe(conn, source_url="https://www.instagram.com/p/XYZ/", title="Link in bio", ingredients=[],
@@ -42,8 +43,10 @@ def test_list_defaults_to_ready(client):
 
 def test_detail_has_step_ingredients_and_embed(client):
     recipe = client.get("/api/recipes/1").json()
-    assert recipe["steps"] == [{"text": "Melt the butter.", "ingredients": [2]},
-                               {"text": "Add garlic and shrimp.", "ingredients": [0, 1]}]
+    assert recipe["steps"] == [
+        {"text": "Melt the butter.", "short_text": None, "ingredients": [2]},
+        {"text": "Add garlic and shrimp.", "short_text": "Add garlic and shrimp", "ingredients": [0, 1]},
+    ]
     assert recipe["video"]["embed_url"] == "https://www.instagram.com/p/ABC123/embed/"
     assert client.get("/api/recipes/99").status_code == 404
 

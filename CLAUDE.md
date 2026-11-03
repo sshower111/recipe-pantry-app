@@ -66,6 +66,7 @@ python main.py list [--todo | --all]   # default: ready recipes only
 python main.py show <id> [--json]
 python main.py import-page <id> [--url <recipe page>] [--file saved.html|list.txt]   # creator's blog
 python main.py reparse <id> [<id> ...] | --missing-steps   # re-run the model on saved text
+python main.py shorten-steps [<id> ...] [--refresh]   # island step versions, no reparse
 python main.py renormalize [--dry-run]   # after normalizer/ALIASES edits
 python main.py thumbnails [--refresh]    # save video thumbnails to data/thumbnails/
 uvicorn api.app:app --port 8000          # API for the web app (add --host 0.0.0.0 for the iPhone)
@@ -131,6 +132,12 @@ cd web; npm run dev                      # web app on :3000 (also .claude/launch
   ~2 min instead of ~1. `reparse` re-runs the model on stored text (no downloads) and never
   replaces existing ingredients with an empty parse; `import-page` without `--url` re-fetches the
   page imported before (pages stored before steps existed lack instructions).
+- **Short steps.** `recipe_steps.short_text` is a ~50-character version of each step for the
+  iOS Dynamic Island / Lock Screen ("Mix the sauce ingredients"), from a second, small model
+  call (`parser.shorten_steps`: steps + ingredient names only, one short version per step,
+  retried on a wrong count). Ingest and `reparse` run it after the parse; failures are logged
+  and leave NULLs. `shorten-steps` fills stored recipes from their saved steps (ingredients
+  untouched). A version that is empty or not shorter is stored NULL; the app then shortens `text`.
 - **Transcript choice:** use platform captions if ≥ 40 chars and `RECIPE_PREFER_CAPTIONS`, else
   Whisper. The video description is always included in the prompt (reels often put the recipe there).
 - **Silent reels:** Instagram serves a video-only file when a reel has no audio; faster-whisper

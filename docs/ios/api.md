@@ -14,6 +14,10 @@ recipes, so field names, types and nulls are exactly what the app will receive.
   (`http://<mac>.local:8000` + `/api/recipes/1/thumbnail`). It is `null` when there is no image.
 - `steps[].ingredients` are **indexes into that recipe's `ingredients` array** (0-based), the
   lines that step mentions. Text matching, so a step like "Combine wet and dry" has `[]`.
+- `steps[].short_text` is a model-written version of about 40-60 characters for the Dynamic
+  Island and Lock Screen ("Mix the sauce ingredients"); show `text` everywhere else. It is
+  `null` until `python main.py shorten-steps` has run on the PC for that recipe, and for a step
+  the model couldn't shorten, so fall back to shortening `text` on the phone.
 - `GET /api/recipes` returns only `status == "ready"` recipes by default. `?status=todo`
   (recipe is elsewhere: blog, bio link) and `?status=all` exist; the app only needs the default.
 - Errors are HTTP status codes with `{"detail": "..."}` (404 for an unknown recipe).
@@ -88,6 +92,7 @@ struct Ingredient: Codable, Hashable {
 
 struct Step: Codable, Hashable {
     let text: String
+    let shortText: String?       // island version; null until shortened
     let ingredients: [Int]       // indexes into Recipe.ingredients
 }
 
@@ -202,12 +207,14 @@ with the first letter capitalised, captions with `#hashtags` stripped.
   "steps": [
     {
       "text": "Melt the butter in a pan over medium heat.",
+      "short_text": "Melt the butter over medium heat",
       "ingredients": [
         2
       ]
     },
     {
       "text": "Add the garlic and shrimp and cook for 3 minutes per side.",
+      "short_text": "Cook garlic and shrimp 3 min per side",
       "ingredients": [
         0,
         1
@@ -215,6 +222,7 @@ with the first letter capitalised, captions with `#hashtags` stripped.
     },
     {
       "text": "Squeeze over the lemon and season with salt.",
+      "short_text": null,
       "ingredients": [
         3,
         4
