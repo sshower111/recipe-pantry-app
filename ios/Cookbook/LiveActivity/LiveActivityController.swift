@@ -15,10 +15,11 @@ enum LiveActivityController {
         let snapshot = CookingSnapshot(recipe)
         CookingStorage.snapshot = snapshot
         await endAll()
-        let index = min(CookingStorage.activeStep(for: recipe.id), recipe.steps.count - 1)
+        let index = min(CookingStorage.progress(for: recipe.id).active, recipe.steps.count - 1)
+        let state = snapshot.state(at: index, timer: CookingStorage.timer)
         let attributes = CookingActivityAttributes(recipeId: recipe.id, recipeTitle: recipe.title)
         do {
-            _ = try Activity.request(attributes: attributes, content: .init(state: snapshot.state(at: index), staleDate: nil))
+            _ = try Activity.request(attributes: attributes, content: .init(state: state, staleDate: nil))
             announcePending = true
         } catch {
             print("Live Activity not started: \(error)")

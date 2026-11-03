@@ -6,6 +6,21 @@ import Foundation
 // Activity run ChangeStepIntent inside the app's process (LiveActivityIntent), so plain
 // UserDefaults.standard is enough to share progress; no App Group needed.
 
+/// Where the cook is in one recipe: the step in focus and the steps ticked off.
+/// Kept on the phone, not the server (docs/ios/api.md).
+nonisolated struct CookingProgress: Codable, Equatable {
+    var active = 0
+    var done: Set<Int> = []
+}
+
+/// A running step timer ("Bake for 28-32 minutes" -> 28 min). One at a time, app-wide.
+nonisolated struct CookingTimer: Codable, Equatable {
+    var recipeId: Int
+    var step: Int
+    var total: Int         // seconds
+    var endsAt: Date
+}
+
 /// What the Live Activity needs to show any step of the recipe being cooked, saved when
 /// the activity starts so the step buttons work without the network.
 nonisolated struct CookingSnapshot: Codable {
@@ -18,37 +33,47 @@ nonisolated struct CookingSnapshot: Codable {
     var title: String
     var steps: [Step]
 
-    func state(at index: Int) -> CookingActivityAttributes.ContentState {
+    /// The countdown shows only on the step whose timer is running.
+    func state(at index: Int, timer: CookingTimer?) -> CookingActivityAttributes.ContentState {
         let step = steps[index]
+        let timerHere = timer.flatMap { $0.recipeId == recipeId && $0.step == index ? $0.endsAt : nil }
         return .init(currentStepIndex: index, totalSteps: steps.count, instructionText: step.text,
-                     stepIngredients: step.ingredients, timerEndsAt: nil)
+                     stepIngredients: step.ingredients, timerEndsAt: timerHere)
     }
 }
 
-/// Step progress lives on the phone, not the server (docs/ios/api.md).
 nonisolated enum CookingStorage {
     private static let snapshotKey = "cookingSnapshot"
+    private static let timerKey = "cookingTimer"
 
-    static func activeStep(for recipeId: Int) -> Int {
-        UserDefaults.standard.integer(forKey: "activeStep:\(recipeId)")
+    static func progress(for recipeId: Int) -> CookingProgress {
+        read(CookingProgress.self, key: "progress:\(recipeId)") ?? CookingProgress()
     }
 
-    static func setActiveStep(_ index: Int, for recipeId: Int) {
-        UserDefaults.standard.set(index, forKey: "activeStep:\(recipeId)")
+    static func setProgress(_ progress: CookingProgress, for recipeId: Int) {
+        write(progress, key: "progress:\(recipeId)")
+    }
+
+    static var timer: CookingTimer? {
+        get { read(CookingTimer.self, key: timerKey) }
+        set { write(newValue, key: timerKey) }
     }
 
     static var snapshot: CookingSnapshot? {
-        get {
-            UserDefaults.standard.data(forKey: snapshotKey)
-                .flatMap { try? JSONDecoder().decode(CookingSnapshot.self, from: $0) }
-        }
-        set {
-            UserDefaults.standard.set(newValue.flatMap { try? JSONEncoder().encode($0) }, forKey: snapshotKey)
-        }
+        get { read(CookingSnapshot.self, key: snapshotKey) }
+        set { write(newValue, key: snapshotKey) }
+    }
+
+    private static func read<T: Decodable>(_ type: T.Type, key: String) -> T? {
+        UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode(type, from: $0) }
+    }
+
+    private static func write<T: Encodable>(_ value: T?, key: String) {
+        UserDefaults.standard.set(value.flatMap { try? JSONEncoder().encode($0) }, forKey: key)
     }
 }
 
-/// The ‹ › buttons in the Live Activity: move the current step and update the activity.
+/// The ‹ › buttons in the Live Activity: move the step in focus and update the activity.
 struct ChangeStepIntent: LiveActivityIntent {
     static let title: LocalizedStringResource = "Change cooking step"
     static let isDiscoverable = false
@@ -67,9 +92,11 @@ struct ChangeStepIntent: LiveActivityIntent {
         guard let snapshot = CookingStorage.snapshot, snapshot.recipeId == recipeId, !snapshot.steps.isEmpty else {
             return .result()
         }
-        let index = min(max(CookingStorage.activeStep(for: recipeId) + offset, 0), snapshot.steps.count - 1)
-        CookingStorage.setActiveStep(index, for: recipeId)
-        let content = ActivityContent(state: snapshot.state(at: index), staleDate: nil)
+        var progress = CookingStorage.progress(for: recipeId)
+        progress.active = min(max(progress.active + offset, 0), snapshot.steps.count - 1)
+        CookingStorage.setProgress(progress, for: recipeId)
+        let content = ActivityContent(state: snapshot.state(at: progress.active, timer: CookingStorage.timer),
+                                      staleDate: nil)
         for activity in Activity<CookingActivityAttributes>.activities where activity.attributes.recipeId == recipeId {
             await activity.update(content)
         }

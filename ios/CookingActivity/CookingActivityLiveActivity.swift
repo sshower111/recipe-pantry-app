@@ -45,7 +45,14 @@ struct CookingActivityLiveActivity: Widget {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(terracotta)
             } compactTrailing: {
-                Image(systemName: "frying.pan.fill").foregroundStyle(terracotta)
+                // A running step timer counts down here by itself (no app updates needed).
+                if let end = state.timerEndsAt {
+                    Countdown(end: end)
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(maxWidth: 50)
+                } else {
+                    Image(systemName: "frying.pan.fill").foregroundStyle(terracotta)
+                }
             } minimal: {
                 Text("\(state.currentStepIndex + 1)")
                     .font(.system(size: 14, weight: .bold))
@@ -90,6 +97,26 @@ private struct StepTitle: View {
             Text("Step \(state.currentStepIndex + 1) of \(state.totalSteps)")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.white)
+            if let end = state.timerEndsAt {
+                Countdown(end: end)
+                    .font(.system(size: 15, weight: .semibold))
+            }
+        }
+    }
+}
+
+/// Counts down on its own; "Time's up" once it has passed (checked when the view is drawn).
+private struct Countdown: View {
+    let end: Date
+
+    var body: some View {
+        if end > .now {
+            Text(timerInterval: Date.now...end, countsDown: true)
+                .monospacedDigit()
+                .multilineTextAlignment(.trailing)
+                .foregroundStyle(terracotta)
+        } else {
+            Text("Time's up").foregroundStyle(terracotta)
         }
     }
 }

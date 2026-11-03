@@ -9,8 +9,8 @@ struct RecipeDetailView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var error: String?
     @State private var showFullCaption = false
-    /// The step the Live Activity follows; its ‹ › buttons can move it while the app is away.
-    @State private var activeStep = 0
+    /// Cooking progress; the Live Activity's ‹ › buttons can move it while the app is away.
+    @State private var session: CookingSession?
 
     private static let platformNames = ["instagram": "Instagram", "youtube": "YouTube", "tiktok": "TikTok"]
 
@@ -69,7 +69,7 @@ struct RecipeDetailView: View {
         // Refresh on every visit (steps may have been re-parsed on the PC); cached copy shows meanwhile.
         .task { await load() }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { readActiveStep() }
+            if phase == .active { session?.reload() }
         }
     }
 
@@ -80,17 +80,17 @@ struct RecipeDetailView: View {
         } catch {
             self.error = error.localizedDescription
         }
-        readActiveStep()
+        updateSession()
     }
 
-    private func readActiveStep() {
-        let count = store.details[recipeId]?.steps.count ?? 0
-        activeStep = min(CookingStorage.activeStep(for: recipeId), max(count - 1, 0))
-    }
-
-    private func selectStep(_ index: Int) {
-        withAnimation(.easeOut(duration: 0.2)) { activeStep = index }
-        CookingStorage.setActiveStep(index, for: recipeId)
+    /// One session per visit; a fresh one only if a re-parse on the PC changed the steps.
+    private func updateSession() {
+        guard let recipe = store.details[recipeId] else { return }
+        if let session, session.steps == recipe.steps {
+            session.reload()
+        } else {
+            session = CookingSession(recipe: recipe)
+        }
     }
 
     private func content(_ recipe: Recipe) -> some View {
@@ -109,22 +109,20 @@ struct RecipeDetailView: View {
                 }
                 .padding(.bottom, 64)
             }
-            // Opened from the Live Activity: jump to the step it was showing.
+            // Opened from the Live Activity: jump to the step card, which shows its step.
             .onChange(of: store.stepToReveal, initial: true) { _, id in
                 guard id == recipeId, !recipe.steps.isEmpty else { return }
                 store.stepToReveal = nil
-                readActiveStep()
+                updateSession()
                 Task {
                     try? await Task.sleep(for: .milliseconds(350))  // let the push finish first
                     withAnimation(.easeInOut(duration: 0.4)) {
-                        proxy.scrollTo(Self.stepID(activeStep), anchor: .center)
+                        proxy.scrollTo(CookingModeView.focusID, anchor: .top)
                     }
                 }
             }
         }
     }
-
-    private static func stepID(_ index: Int) -> String { "step-\(index)" }
 
     private func hero(_ recipe: Recipe) -> some View {
         Color.sandSoft
@@ -243,7 +241,7 @@ struct RecipeDetailView: View {
             }
             .padding(.horizontal, 16)
 
-            IngredientRow(ingredients: recipe.ingredients)
+            IngredientRow(ingredients: recipe.ingredients, active: session?.activeIngredients ?? [])
 
             if let page = recipe.recipePageUrl.flatMap(URL.init(string:)) {
                 Link(destination: page) {
@@ -257,19 +255,12 @@ struct RecipeDetailView: View {
         }
     }
 
-    /// Numbered steps; tap one to make it the current step (the one the Dynamic Island shows).
-    /// Cooking mode (build step 4) builds on this.
+    /// Cooking mode; the step in focus is the one the Dynamic Island follows.
     private func steps(_ recipe: Recipe) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 20) {
             Text("Cooking Steps")
                 .font(.serifTitle(30))
                 .foregroundStyle(Color.ink)
-            if !recipe.steps.isEmpty {
-                Text("Tap a step to follow it in the Dynamic Island while the video plays.")
-                    .font(.subheadline)
-                    .foregroundStyle(Color.muted)
-                    .padding(.bottom, 4)
-            }
 
             if recipe.steps.isEmpty {
                 Text("The post doesn't describe the method. Watch the video to follow along.")
@@ -278,35 +269,9 @@ struct RecipeDetailView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.white.opacity(0.6), in: .rect(cornerRadius: 24))
                     .overlay { RoundedRectangle(cornerRadius: 24).strokeBorder(Color.sand) }
-            } else {
-                ForEach(Array(recipe.steps.enumerated()), id: \.offset) { index, step in
-                    let isActive = index == activeStep
-                    Button {
-                        selectStep(index)
-                    } label: {
-                        HStack(alignment: .firstTextBaseline, spacing: 14) {
-                            Text("\(index + 1)")
-                                .font(.serifTitle(22))
-                                .foregroundStyle(Color.terracotta)
-                                .frame(width: 24, alignment: .trailing)
-                            Text(step.text)
-                                .foregroundStyle(Color.ink)
-                                .lineSpacing(3)
-                                .multilineTextAlignment(.leading)
-                            Spacer(minLength: 0)
-                        }
-                        .padding(14)
-                        .background(isActive ? Color.terracottaSoft : Color.clear, in: .rect(cornerRadius: 18))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 18)
-                                .strokeBorder(isActive ? Color.terracotta : Color.clear)
-                        }
-                        .contentShape(.rect(cornerRadius: 18))
-                    }
-                    .buttonStyle(.plain)
-                    .id(Self.stepID(index))
-                    .accessibilityAddTraits(isActive ? .isSelected : [])
-                    .sensoryFeedback(.selection, trigger: activeStep)
+            } else if let session {
+                CookingModeView(session: session, ingredients: recipe.ingredients, tried: recipe.tried) {
+                    Task { await store.toggle(.tried, for: recipeId) }
                 }
             }
         }
