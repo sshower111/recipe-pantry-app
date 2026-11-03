@@ -1,9 +1,9 @@
-"""Turn the cook animation's frames into the flipbook font the Live Activity uses.
+"""Turn the cook drawing's frames into the font the Live Activity uses for its corner cook.
 
-Live Activities can't run animations, but iOS keeps `Text(timerInterval:)` ticking on its
-own. Shown in this font and cropped to its last character, that clock's seconds digit
-(0-9, a new one every second) becomes a 10-frame flipbook. See
-`ios/CookingActivity/CookingActivityLiveActivity.swift::CookFlipbook`.
+Each digit 0-9 is one pose of the wok toss; the widget shows one pose per step
+(`ios/CookingActivity/CookingActivityLiveActivity.swift::CookFrame`). It was built as a
+1-frame-per-second flipbook through iOS's self-updating `Text(timerInterval:)`, but iOS
+draws timer text itself and ignores custom fonts, so only static text shows the frames.
 
 Frames are SVGs on a 100x100 viewBox whose `<path d="...">` shapes are filled outlines
 (strokes already turned into shapes: Inkscape "Stroke to Path", or

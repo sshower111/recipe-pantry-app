@@ -3,8 +3,8 @@
 //  CookingActivity
 //
 //  The Lock Screen card and Dynamic Island for the step being cooked (docs/ios/README.md,
-//  section 6): "Step 2/4" and the power-up emblem on top, the (shortened) instruction large,
-//  the step's ingredients on one line, and wide ‹ › buttons at the bottom. Kept under the
+//  section 6): "Step 2/4" and the cook (a pose per step) on top, the (shortened) instruction
+//  large, the step's ingredients on one line, and wide ‹ › ✕ buttons at the bottom. Kept under the
 //  ~160 pt height iOS allows, or it crops the card. The buttons run ChangeStepIntent
 //  (ios/Shared/CookingProgress.swift); tapping anywhere else opens the recipe at its step.
 //
@@ -34,7 +34,7 @@ struct CookingActivityLiveActivity: Widget {
                         .frame(maxHeight: .infinity)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    CookFlipbook(since: context.attributes.startedAt, size: 40)
+                    CookFrame(size: 40, step: state.currentStepIndex)
                         .padding(.trailing, 6)
                 }
                 // Kept short: the expanded island crops anything past ~160 pt in all.
@@ -58,10 +58,10 @@ struct CookingActivityLiveActivity: Widget {
                         .frame(maxWidth: 50)
                 } else {
                     // A still frame: plain text in the CookFlip font, no ticking clock.
-                    CookFrame(size: 24)
+                    CookFrame(size: 24, step: state.currentStepIndex)
                 }
             } minimal: {
-                CookFrame(size: 22)
+                CookFrame(size: 22, step: state.currentStepIndex)
             }
             .widgetURL(recipeURL(context))
             .keylineTint(terracotta)
@@ -81,7 +81,7 @@ private struct LockScreenView: View {
             HStack(alignment: .center) {
                 StepHeader(state: context.state, size: 16)
                 Spacer()
-                CookFlipbook(since: context.attributes.startedAt, size: 38)
+                CookFrame(size: 38, step: context.state.currentStepIndex)
             }
             Instruction(state: context.state, size: 17)
             StepButtons(context: context, height: 30)
@@ -101,8 +101,13 @@ private struct StepHeader: View {
         HStack(spacing: 8) {
             Text("Step \(state.currentStepIndex + 1)/\(state.totalSteps)")
                 .foregroundStyle(terracotta)
+                .lineLimit(1)
+                .fixedSize()
             if let end = state.timerEndsAt {
+                // Timer text reserves room for its longest value; without a fixed width it
+                // squeezed "Step 2/4" onto two lines and pushed the cook out of the corner.
                 Countdown(end: end)
+                    .frame(width: size * 3.4, alignment: .leading)
             }
         }
         .font(.system(size: size, weight: .semibold))
@@ -218,34 +223,18 @@ private struct StepButton<Action: AppIntent>: View {
     }
 }
 
-/// The cook animation, one frame per second. Live Activities can't animate, but iOS keeps
-/// `Text(timerInterval:)` ticking by itself; in the CookFlip font each digit is a frame
-/// (`Fonts/CookFlip.ttf`, built by `ios/tools/make_flipbook_font.py` from `ios/Art/cook-frames`),
-/// and cropping the clock to its last character leaves the seconds digit: frames 0-9 on loop.
-private struct CookFlipbook: View {
-    let since: Date
-    let size: CGFloat
-
-    var body: some View {
-        Text(timerInterval: since...since.addingTimeInterval(12 * 3600), countsDown: false)
-            .font(.custom("CookFlip", size: size))
-            // The clock reserves room for its longest value and would draw "0:05" at the left
-            // of it; right-aligned, the seconds digit sits at the edge the crop keeps.
-            .multilineTextAlignment(.trailing)
-            .foregroundStyle(cookYellow)
-            .fixedSize()
-            .frame(width: size, height: size, alignment: .trailing)
-            .clipped()
-            .accessibilityHidden(true)
-    }
-}
-
-/// One still frame of the cook (the CookFlip font's "0").
+/// The cook in the corner: one pose of the wok toss per step (`Fonts/CookFlip.ttf`, whose
+/// digits 0-9 are the frames, built by `ios/tools/make_flipbook_font.py` from
+/// `ios/Art/cook-frames`). A per-second flipbook through the self-updating
+/// `Text(timerInterval:)` was tried and doesn't work: iOS draws timer text itself and ignores
+/// the custom font (verified in the Simulator: static text in the font shows, the timer is blank).
 private struct CookFrame: View {
     let size: CGFloat
+    /// The step index; neighbouring steps get poses three frames apart, so each change shows.
+    var step = 0
 
     var body: some View {
-        Text("0")
+        Text("\((step * 3) % 10)")
             .font(.custom("CookFlip", size: size))
             .foregroundStyle(cookYellow)
             .frame(width: size, height: size)

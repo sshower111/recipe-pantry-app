@@ -206,9 +206,10 @@ cd web; npm run dev                      # web app on :3000 (also .claude/launch
     ‹ › run `ChangeStepIntent` (a LiveActivityIntent, so in the app's process: no App Group
     needed). Keep the Lock Screen card and expanded island under ~160 pt, or iOS crops them.
     Island text prefers the server's `short_text`, else `Step.islandText`'s regex shortening.
-  - The corner cook "animation": Live Activities can't animate, so `CookFlip.ttf`'s digits
-    are 10 outline frames and the widget shows a self-updating `Text(timerInterval:)` in it,
-    right-aligned and cropped to the seconds digit (1 frame/s). Rebuild with
+  - The corner cook: `CookFlip.ttf`'s digits are 10 outline poses; the widget shows one per
+    step (`CookFrame`). A 1 frame/s flipbook through `Text(timerInterval:)` in that font was
+    tried and doesn't render: iOS draws timer text itself and ignores custom fonts (verified
+    in the Simulator: static text in the font shows, the timer is blank). Rebuild with
     `ios/tools/draw_cook_frames.swift` -> `ios/Art/cook-frames/*.svg` ->
     `ios/tools/make_flipbook_font.py`. The cook is an original drawing: don't copy existing
     characters (the user asked for old-school anime style, not Dragon Ball characters).

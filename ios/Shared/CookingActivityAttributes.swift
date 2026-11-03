@@ -14,6 +14,4 @@ nonisolated struct CookingActivityAttributes: ActivityAttributes {
 
     var recipeId: Int
     var recipeTitle: String
-    /// When the activity started: the cook flipbook's clock counts from here.
-    var startedAt = Date.now
 }

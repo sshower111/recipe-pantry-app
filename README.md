@@ -1,26 +1,106 @@
 # Recipe Pantry
 
-A local pipeline that turns cooking shorts and reels into structured recipes and
-tells you what you can cook with what's in your pantry. Everything runs on your machine.
+Save a cooking reel from Instagram's share sheet and get a structured recipe on your phone a
+couple of minutes later: ingredients, steps and timers, read from the video's caption,
+speech, on-screen text or linked blog by a local AI pipeline. Then search by what's in your
+pantry and cook step by step from the iPhone's Dynamic Island while the video plays.
+Everything runs on your own machines: no cloud APIs.
 
+<p align="center">
+  <img src="docs/media/feed.jpg" width="24%" alt="Cookbook feed">
+  <img src="docs/media/pantry.jpg" width="24%" alt="Search by what you have">
+  <img src="docs/media/cooking.jpg" width="24%" alt="Cooking mode with a step timer">
+  <img src="docs/media/island.jpg" width="24%" alt="Step in the Dynamic Island over the reel">
+</p>
+
+<p align="center">
+  <img src="docs/media/demo.gif" width="300" alt="Tap Watch on Instagram, then follow the step in the Dynamic Island">
+</p>
+
+<p align="center"><sub>"Watch on Instagram" opens the reel and the current step follows in the
+Dynamic Island. Captured in the iOS Simulator (Instagram's web page stands in for the app).</sub></p>
+
+## What it does
+
+- **Share a reel, get a recipe.** "Cookbook" in the iPhone share sheet sends the link to the
+  PC, which downloads the post, transcribes it, has a local LLM extract the recipe, and saves
+  it; the app shows "Adding..." and then the new recipe. Posts without a recipe yet ("link in
+  bio", "coming soon") can be saved for later and checked again.
+- **Multimodal extraction.** Platform captions or Whisper speech-to-text, the post's caption,
+  EasyOCR on video frames when ingredients only appear on screen, and the creator's blog
+  (schema.org Recipe data) when the caption links one. Non-English posts come out in English.
+- **Cook from the Dynamic Island.** The current step, its ingredients and a running timer stay
+  in the island and on the Lock Screen while the reel plays in Instagram, with buttons to move
+  between steps. Step text there is a model-written short version of each step.
+- **What can I make?** Ingredient names are normalized ("2 large eggs" and "eggs" are both
+  `egg`), so picking what you have ranks recipes by how much of it they use.
+- **Works offline.** The phone keeps a copy of the whole cookbook for when the PC is off.
+
+## How the AI pipeline works
+
+```mermaid
+flowchart LR
+    phone["iPhone app<br/>share sheet"] -- "POST /api/ingest" --> api["FastAPI<br/>job queue"]
+    api --> dl["yt-dlp<br/>metadata, captions, audio"]
+    dl --> asr["faster-whisper<br/>(or platform captions)"]
+    asr --> llm["Ollama · qwen3.5:9b<br/>JSON-schema output"]
+    llm -- "too few ingredients<br/>or no amounts" --> fallback["recipe page JSON-LD,<br/>then EasyOCR on frames"]
+    fallback --> llm
+    llm --> short["2nd call: short steps<br/>for the Dynamic Island"]
+    short --> db[("SQLite<br/>normalized ingredients")]
+    db --> api
+    api -- "recipes, pantry search" --> phone
 ```
-URL ──yt-dlp──► metadata + captions + audio
-                     │
-                     ├─ captions good? ──► transcript
-                     └─ else faster-whisper ──► transcript
-                                                   │
-         title + description + transcript ──► Ollama (qwen2.5:7b, JSON schema)
-                                                   │
-          too few ingredients / no amounts? ──► video frames ──EasyOCR──► on-screen text
-                                                   │                        └─► re-parse
-                         normalize names/units ──► SQLite
-                                                   │
-           selected ingredients ──► recipes using the most of them, fewest extras first
-```
 
-## Demo
+- **Structured output from a local model.** Each parse calls Ollama's `/api/chat` with the
+  pydantic model's JSON schema as `format` (constrained decoding), `temperature 0`, and
+  thinking off; the reply is validated with pydantic and retried once if it doesn't fit.
+  The prompt pins down the hard cases found in real posts: translate names to English
+  ("蒜頭" / "ajo" -> "garlic"), keep a single batch size when a post lists several, and take
+  steps only from what the post actually says.
+- **Fallbacks only when needed.** A parse with fewer than 3 ingredients or no amounts counts
+  as incomplete. The pipeline then tries the creator's linked recipe page (exact and cheap)
+  before OCR (about 3 extra minutes on CPU), and keeps a retry only if it finds at least as
+  many ingredients.
+- **A second, small model call for short steps.** The island fits about two lines, so each
+  step also gets a ~50-character imperative version from the step text and ingredient names.
+  With a plain list in the schema the 9B model merged ten steps into one, so the schema has
+  one required key per step (`step_1`, `step_2`, ...), which makes merging impossible.
+- **Normalization on both sides.** Recipe ingredients and pantry queries go through the same
+  normalizer (aliases, plurals, accent folding, units), so matching relies on consistency
+  rather than on the model naming things identically. The original wording is kept for display.
+- **Background jobs.** Shared links queue on the PC and run one at a time (a 9B model and
+  Whisper on one machine); the app polls the job and refreshes when the recipe lands.
 
-Real output from my own database of about 90 recipes saved from Instagram reels.
+From my own collection of 117 saved posts: 90 recipes with 922 ingredient lines (343 distinct
+ingredients after normalization) and 739 steps, 99% of which have a model-written island
+version (73 characters on average, 43 shortened). 229 tests run without network, Ollama or
+Whisper.
+
+## iPhone app
+
+Native SwiftUI (iOS 17+), talking to the FastAPI server over home Wi-Fi.
+
+- **Cookbook feed** with search that also takes "what you have": ingredient chips re-rank the
+  feed by the pantry query, showing what each recipe uses and what's missing. Filters for
+  favorites ❤️, cooked 👌🎉 and saved-for-later 🔖; swipe left to remove (undoable).
+- **Recipe screen**: photo, caption, ingredient tiles, and a cooking mode with one step at a
+  time, its ingredients highlighted, and timers read from the step ("bake for 28-32 minutes"
+  -> 28 min, with a "Time's up" notification).
+- **Live Activity**: starts when you tap "Watch on Instagram" or leave a recipe; ‹ › change the
+  step from the island or Lock Screen (App Intents run in the app's process); a running timer
+  counts down in the island; tapping it opens the recipe at that step. The cook in the corner
+  is an original line drawing in a custom font (one glyph per pose) that changes pose with
+  each step.
+- **Share extension** for adding reels, and an **offline copy** of the feed, every recipe and
+  its photo.
+
+Code: [`ios/`](ios/) (app, `CookingActivity` widget, `AddToCookbook` share extension). Build
+notes: [docs/ios/README.md](docs/ios/README.md); API contract: [docs/ios/api.md](docs/ios/api.md).
+
+## CLI demo
+
+Real output from the same database, on the PC.
 
 **What can I cook with what's in the fridge?** Recipes that use the most of the selected
 ingredients come first; ties go to the one needing the fewest other ingredients.
@@ -70,11 +150,19 @@ Makes: 1 standard loaf pan
 Salt, pepper, water and oil count as pantry staples, so they never show up as missing.
 Links are shortened here; the CLI prints full URLs.
 
-Recipes by their original creators:
+Recipes and photos by their original creators:
 [Classic Japanese Bagel](https://www.instagram.com/p/CzJiZmOLfaW/) ·
 [No-Yeast Youtiao](https://www.instagram.com/p/C188sW2PfKU/) ·
 [Honey Butter Toast](https://www.instagram.com/p/C63hOr1ysaW/) ·
-[Salted Maple Banana Bread](https://www.instagram.com/p/DZva78zpQuq/)
+[Salted Maple Banana Bread](https://www.instagram.com/p/DZva78zpQuq/).
+In the screenshots:
+[Peach Jasmine Green Tea Cold Brew](https://www.instagram.com/p/Dee5z8NAwOd/) (Abril Murillo) ·
+[Baked Apple Milk Tea](https://www.instagram.com/p/Dd6spZaNhT_/) (vivikitchen) ·
+[Chinese Braised Pork Belly](https://www.instagram.com/p/Dd7CG0zxl3U/) (haha eats) ·
+[Chinese Tofu Skin Salad](https://www.instagram.com/p/DeJe5w8JqpS/) (Angela Tracy) ·
+[Peanut Streusel Bread](https://www.instagram.com/p/DXuG2_ZDdS3/) (erin) ·
+[Brown Butter Brownies](https://www.instagram.com/p/Cr68aGzOMsL/) (Sarah Fennel) ·
+[Souffle Omelette and Chocolate Lava Cake](https://www.instagram.com/p/DEVaQDtS2WJ/) (SauccEats).
 
 ## Layout
 
@@ -85,16 +173,20 @@ pipeline/
   downloader.py        yt-dlp: metadata, captions (VTT -> text), audio; video for OCR
   ocr.py               ffmpeg frame sampling + EasyOCR -> distinct on-screen text lines
   transcriber.py       faster-whisper (model cached, VAD on)
-  parser.py            prompt + Ollama call with JSON-schema output, pydantic validation
+  parser.py            prompts + Ollama calls with JSON-schema output, pydantic validation
   ingest.py            orchestrates the above and saves the result
+  webrecipe.py         schema.org Recipe JSON-LD from the creator's linked page
   urls.py              canonical URLs (share-link variants -> one key), batch file reading
   thumbnails.py        saves each video's thumbnail under data/thumbnails/
-api/app.py             FastAPI JSON server for the web app
-web/                   Next.js + Tailwind + Framer Motion app (cookbook, recipe, cooking mode)
+api/
+  app.py               FastAPI JSON server for the iPhone and web apps
+  jobs.py              background queue for links shared from the phone
+ios/                   SwiftUI app, Live Activity widget, share extension (Xcode project)
+web/                   Next.js + Tailwind + Framer Motion app (browser version)
 db/
-  schema.py            recipes / ingredients / recipe_ingredients + connect()
+  schema.py            recipes / ingredients / recipe_ingredients / recipe_steps + connect()
   normalize.py         canonical ingredient names and units
-  repository.py        save_recipe (upsert by URL), get_recipe, list_recipes
+  repository.py        save_recipe (upsert by URL), get_recipe, list_recipes, marks
   pantry.py            find_recipes_by_pantry
   step_ingredients.py  which ingredient lines each step mentions
 tests/
@@ -111,7 +203,7 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements-dev.txt
 copy .env.example .env      # optional
-ollama pull qwen2.5:7b
+ollama pull qwen2.5:7b      # or qwen3.5:9b, which this demo uses
 ```
 
 ```bash
@@ -120,7 +212,7 @@ python -m venv .venv
 source .venv/bin/activate        # Git Bash on Windows: source .venv/Scripts/activate
 pip install -r requirements-dev.txt
 cp .env.example .env
-ollama pull qwen2.5:7b
+ollama pull qwen2.5:7b      # or qwen3.5:9b, which this demo uses
 ```
 
 The first transcription downloads the Whisper model (`small` is about 500 MB) into the
@@ -188,7 +280,7 @@ for m in find_recipes_by_pantry(conn, ["chicken", "garlic", "rice"], limit=5):
 
 ## Web app
 
-A mobile-first cookbook in `web/` (Next.js, Tailwind, Framer Motion) reads the database
+The browser version: a mobile-first cookbook in `web/` (Next.js, Tailwind, Framer Motion) reads the database
 through a small FastAPI server. Run both (Node 20+):
 
 ```bash
@@ -211,8 +303,8 @@ wording (`db/step_ingredients.py`), so a step like "combine wet and dry" shows n
 API: `GET /api/recipes[?status=ready|todo|all]`, `GET /api/recipes/{id}`,
 `PATCH /api/recipes/{id}` (`{"favorite": true}` / `{"tried": true}`),
 `GET /api/recipes/{id}/thumbnail`, `GET /api/ingredients`, `GET /api/pantry?have=a&have=b`.
-Full contract with sample responses: [docs/ios/api.md](docs/ios/api.md). A native iPhone app
-is planned: [docs/ios/README.md](docs/ios/README.md). `next.config.ts` proxies `/api` to
+Full contract with sample responses (including the iPhone app's ingest jobs):
+[docs/ios/api.md](docs/ios/api.md). `next.config.ts` proxies `/api` to
 `RECIPE_API_ORIGIN` (default `http://127.0.0.1:8000`).
 
 ## Configuration
