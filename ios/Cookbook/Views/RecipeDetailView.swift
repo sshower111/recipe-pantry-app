@@ -55,6 +55,7 @@ struct RecipeDetailView: View {
                     } label: {
                         Image(systemName: recipe.favorite ? "heart.fill" : "heart")
                             .symbolRenderingMode(.monochrome)
+                            .fontWeight(.medium)
                             .foregroundStyle(recipe.favorite ? Color.heart : Color.heartOutline)
                             .symbolEffect(.bounce, value: recipe.favorite)
                     }

@@ -58,7 +58,7 @@ struct RecipeCard: View {
     private var heart: some View {
         Button(action: onToggleFavorite) {
             Image(systemName: recipe.favorite ? "heart.fill" : "heart")
-                .font(.system(size: 17))
+                .font(.system(size: 17, weight: .medium))
                 .symbolRenderingMode(.monochrome)
                 .foregroundStyle(recipe.favorite ? Color.heart : Color.heartOutline)
                 .symbolEffect(.bounce, value: recipe.favorite)

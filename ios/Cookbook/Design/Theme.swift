@@ -18,7 +18,7 @@ extension Color {
     static let ink = Color(hex: 0x2B2622)            // text
     static let muted = Color(hex: 0x8A817A)
     static let heart = Color(hex: 0xB0272B)           // filled favorite heart (deeper than terracotta)
-    static let heartOutline = Color(hex: 0xB8AFA8)    // empty heart, between muted and sand
+    static let heartOutline = Color(hex: 0x9A9089)    // empty heart: a touch lighter than muted
 }
 
 extension Font {
