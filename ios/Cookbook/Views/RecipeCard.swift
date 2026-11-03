@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// One row of the cookbook feed (web: components/RecipeCard.tsx).
+/// One row of the cookbook feed (web: components/RecipeCard.tsx). Opens the recipe;
+/// the heart sits above the link so tapping it doesn't navigate.
 struct RecipeCard: View {
     let recipe: RecipeSummary
     let thumbnailURL: URL?
@@ -13,6 +14,12 @@ struct RecipeCard: View {
     }
 
     var body: some View {
+        NavigationLink(value: recipe.id) { card }
+            .buttonStyle(.plain)
+            .overlay(alignment: .topTrailing) { heart }
+    }
+
+    private var card: some View {
         HStack(spacing: 16) {
             Thumbnail(url: thumbnailURL, title: recipe.title)
                 .frame(width: 96, height: 96)
@@ -45,20 +52,22 @@ struct RecipeCard: View {
         .padding(12)
         .background(Color.white.opacity(0.6), in: .rect(cornerRadius: 24))
         .overlay { RoundedRectangle(cornerRadius: 24).strokeBorder(Color.sand) }
-        .overlay(alignment: .topTrailing) {
-            Button(action: onToggleFavorite) {
-                Image(systemName: recipe.favorite ? "heart.fill" : "heart")
-                    .font(.system(size: 17))
-                    .foregroundStyle(recipe.favorite ? Color.terracotta : Color.muted)
-                    .symbolEffect(.bounce, value: recipe.favorite)
-                    .frame(width: 36, height: 36)
-                    .contentShape(.circle)
-            }
-            .buttonStyle(.plain)
-            .padding(12)
-            .accessibilityLabel(recipe.favorite ? "Remove from favorites" : "Add to favorites")
-            .sensoryFeedback(.selection, trigger: recipe.favorite)
+        .contentShape(.rect(cornerRadius: 24))
+    }
+
+    private var heart: some View {
+        Button(action: onToggleFavorite) {
+            Image(systemName: recipe.favorite ? "heart.fill" : "heart")
+                .font(.system(size: 17))
+                .foregroundStyle(recipe.favorite ? Color.terracotta : Color.muted)
+                .symbolEffect(.bounce, value: recipe.favorite)
+                .frame(width: 36, height: 36)
+                .contentShape(.circle)
         }
+        .buttonStyle(.plain)
+        .padding(12)
+        .accessibilityLabel(recipe.favorite ? "Remove from favorites" : "Add to favorites")
+        .sensoryFeedback(.selection, trigger: recipe.favorite)
     }
 }
 

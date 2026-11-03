@@ -45,6 +45,7 @@ struct CookbookView: View {
             .background(Color.cream)
             .refreshable { await store.load() }
             .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(for: Int.self) { RecipeDetailView(recipeId: $0) }
         }
         .task { if store.recipes == nil { await store.load() } }
     }
@@ -140,7 +141,7 @@ struct CookbookView: View {
             LazyVStack(spacing: 12) {
                 ForEach(shown) { recipe in
                     RecipeCard(recipe: recipe, thumbnailURL: store.thumbnailURL(recipe.thumbnailUrl)) {
-                        Task { await store.toggleFavorite(recipe.id) }
+                        Task { await store.toggle(.favorite, for: recipe.id) }
                     }
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 }

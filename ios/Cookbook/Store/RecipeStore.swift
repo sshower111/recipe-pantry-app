@@ -1,12 +1,16 @@
 import Foundation
 import Observation
 
-/// The cookbook list and the user's marks, shared by every screen.
+/// The cookbook list, opened recipes and the user's marks, shared by every screen.
 @Observable
 final class RecipeStore {
+    enum Mark { case favorite, tried }
+
     /// nil until the first load finishes.
     private(set) var recipes: [RecipeSummary]?
     private(set) var error: String?
+    /// Full recipes already opened, by id.
+    private(set) var details: [Int: Recipe] = [:]
 
     func load() async {
         do {
@@ -17,16 +21,24 @@ final class RecipeStore {
         }
     }
 
-    /// Flips the heart at once and puts it back if the server refuses (as the web app does).
-    func toggleFavorite(_ id: Int) async {
-        guard let recipe = recipes?.first(where: { $0.id == id }) else { return }
-        let favorite = !recipe.favorite
-        update(id) { $0.favorite = favorite }
+    func loadRecipe(_ id: Int) async throws {
+        details[id] = try await APIClient.current().recipe(id: id)
+    }
+
+    /// Flips a mark at once and puts it back if the server refuses (as the web app does).
+    func toggle(_ mark: Mark, for id: Int) async {
+        guard let current = value(of: mark, for: id) else { return }
+        let value = !current
+        set(mark, value, for: id)
         do {
-            let marks = try await APIClient.current().setMarks(recipeId: id, favorite: favorite)
-            update(id) { $0.favorite = marks.favorite; $0.tried = marks.tried }
+            let marks = try await APIClient.current().setMarks(
+                recipeId: id,
+                favorite: mark == .favorite ? value : nil,
+                tried: mark == .tried ? value : nil)
+            set(.favorite, marks.favorite, for: id)
+            set(.tried, marks.tried, for: id)
         } catch {
-            update(id) { $0.favorite = !favorite }
+            set(mark, current, for: id)
         }
     }
 
@@ -34,8 +46,23 @@ final class RecipeStore {
         (try? APIClient.current())?.absoluteURL(path)
     }
 
-    private func update(_ id: Int, _ change: (inout RecipeSummary) -> Void) {
-        guard let index = recipes?.firstIndex(where: { $0.id == id }) else { return }
-        change(&recipes![index])
+    private func value(of mark: Mark, for id: Int) -> Bool? {
+        if let recipe = details[id] { return mark == .favorite ? recipe.favorite : recipe.tried }
+        guard let recipe = recipes?.first(where: { $0.id == id }) else { return nil }
+        return mark == .favorite ? recipe.favorite : recipe.tried
+    }
+
+    /// Keeps the list and the opened recipe in step.
+    private func set(_ mark: Mark, _ value: Bool, for id: Int) {
+        if let index = recipes?.firstIndex(where: { $0.id == id }) {
+            switch mark {
+            case .favorite: recipes![index].favorite = value
+            case .tried: recipes![index].tried = value
+            }
+        }
+        switch mark {
+        case .favorite: details[id]?.favorite = value
+        case .tried: details[id]?.tried = value
+        }
     }
 }
