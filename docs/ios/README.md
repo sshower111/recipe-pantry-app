@@ -1,18 +1,26 @@
 # Native iOS app: handoff runbook
 
 Plan for building **Cookbook**, a SwiftUI iPhone app (iOS 17+) with a cooking-step Live
-Activity, on a Mac. The Python pipeline and FastAPI server move to the Mac too; the iPhone app
-reads from it over Wi-Fi. Nothing runs in the cloud.
+Activity, on a Mac. The iPhone app reads the FastAPI server over Wi-Fi. Nothing runs in the
+cloud.
+
+> **Revised 2026-11-03: the backend stays on the Windows PC.** The MacBook Air (M1, 16 GB)
+> struggled with Ollama, the server and the Simulator next to Xcode, so the Mac is now only
+> the development client (Xcode, Claude Code, git). The pipeline, SQLite, Ollama and
+> `uvicorn` run on the PC; the app talks to `http://<PC IP>:8000`. No iOS Simulators: build,
+> run and debug on the real iPhone. Sections 1-2 below record the original move to the Mac
+> (Xcode, the venv and pytest still work there); sections 3 and 7 are updated for the PC.
 
 Read with: [`api.md`](api.md) (the exact JSON the app decodes) and the root `CLAUDE.md`.
 
 ```
-iPhone: Cookbook.app (SwiftUI)  --HTTP over Wi-Fi-->  Mac: uvicorn api.app:app (FastAPI + SQLite)
-        + CookingActivity widget extension                  + main.py ingest (yt-dlp, Whisper, Ollama)
+iPhone: Cookbook.app (SwiftUI)  --HTTP over Wi-Fi-->  Windows PC: uvicorn api.app:app (FastAPI + SQLite)
+        + CookingActivity widget extension                       + main.py ingest (yt-dlp, Whisper, Ollama)
+Mac: Xcode + Claude Code only (builds and installs the app on the iPhone)
 ```
 
 The iPhone can't run the pipeline (yt-dlp, Whisper, a 9B Ollama model), so adding recipes
-stays a Mac job. The phone needs the Mac awake and on the same network; away from home, a
+stays a PC job. The phone needs the PC awake and on the same network; away from home, a
 private network such as Tailscale is the later option.
 
 ---
@@ -75,15 +83,26 @@ The code is on GitHub. **The data is not**, and must never be committed (the rep
 
 ## 3. Let the iPhone reach the server
 
-- Start the API with `--host 0.0.0.0` (default `127.0.0.1` only accepts the Mac itself).
-- Use the Mac's Bonjour name, which survives IP changes: `scutil --get LocalHostName`
-  -> `http://<that-name>.local:8000`. The app keeps it in a Settings screen (`@AppStorage`).
-- If macOS Firewall is on, allow incoming connections for Python when asked.
-- **Simulator first**: the iOS Simulator shares the Mac's network, so `http://localhost:8000`
-  works there, and the iPhone 15/16 Pro simulators show the Dynamic Island. Use a real
-  iPhone once the basics work.
-- iPhone: same Wi-Fi as the Mac; Settings > Privacy & Security > Developer Mode on (appears
-  after Xcode sees the phone); allow the app's Local Network prompt on first launch.
+The server runs on the Windows PC (see the revision note at the top).
+
+- On the PC, start the API with `uvicorn api.app:app --host 0.0.0.0 --port 8000` (the default
+  `127.0.0.1` only accepts the PC itself).
+- Windows Firewall: allow Python on **Private** networks when Windows asks, or add an inbound
+  rule for TCP 8000. The home Wi-Fi must be a Private network, not Public.
+- Use the PC's LAN IP (`ipconfig` -> IPv4 Address), e.g. `http://192.168.2.20:8000`. Give
+  the PC a fixed address (a DHCP reservation in the router) so it doesn't change. The app
+  keeps it in a Settings screen (`@AppStorage("serverURL")`); `APIClient.defaultServerURL`
+  is the starting value. The app sets `NSAllowsLocalNetworking` for plain `http://` on the
+  LAN; confirm on the first device run that loads to the IP aren't blocked by ATS.
+- Check from the iPhone first: Safari -> `http://<PC IP>:8000/api/recipes` shows JSON.
+- **No Simulator.** Build and run on the iPhone (USB first; Xcode > Window > Devices and
+  Simulators > "Connect via network" for Wi-Fi after that). From the terminal:
+  `xcodebuild -project ios/Cookbook.xcodeproj -scheme Cookbook -destination 'generic/platform=iOS' -allowProvisioningUpdates build`,
+  then `xcrun devicectl device install app --device <name> <path to Cookbook.app>`.
+- iPhone: same Wi-Fi as the PC; Settings > Privacy & Security > Developer Mode on (appears
+  after Xcode sees the phone); with a free Apple ID, trust the developer certificate under
+  Settings > General > VPN & Device Management; allow the app's Local Network prompt on
+  first launch.
 
 ## 4. Create the Xcode project (by hand, 5 minutes)
 
@@ -191,19 +210,20 @@ Dynamic Island while the reel plays.
 
 ## 7. Build order (each step ends runnable)
 
-1. Theme + models + API client; a debug list of titles from the server (Simulator,
-   `localhost`). **Check:** 89 titles.
+Every check runs on the real iPhone against the PC server (no Simulator, see section 3).
+
+1. Theme + models + API client; a debug list of titles from the server. **Check:** 89 titles.
 2. Cookbook feed with thumbnails, search, filters, favorite heart (PATCH).
 3. Recipe detail: hero, caption ("See more"), pills, ingredient row, Tried / Watch buttons.
 4. Cooking mode: focus card with step ingredients, Next / Previous, done steps at 0.4
    opacity, progress saved per recipe, step timers parsed from step text
    (`web/lib/stepTimer.ts`: "28-32 minutes" -> 28 min, low end of a range).
-5. Settings: server URL (`<mac>.local`), connection test, Dynamic Island switch.
-6. Live Activity: attributes, widget layouts, controller + scenePhase. **Check** in the
-   iPhone 16 Pro simulator: open a recipe, press Home: island shows; reopen: it's gone.
-7. Real iPhone over Wi-Fi. Pantry screen.
+5. Settings: server URL (the PC's IP), connection test, Dynamic Island switch.
+6. Live Activity: attributes, widget layouts, controller + scenePhase. **Check** on the
+   iPhone: open a recipe, press Home: island shows; reopen: it's gone.
+7. Pantry screen.
 8. Later: offline cache of fetched recipes, adding recipes from the phone (share sheet ->
-   `POST` an ingest job; needs a new API endpoint and a job queue on the Mac).
+   `POST` an ingest job; needs a new API endpoint and a job queue on the PC).
 
 ## 8. Decided / known gaps
 
@@ -224,6 +244,6 @@ Paste after sections 1 to 4 are done (data moved, server running, empty Xcode pr
 > Read `CLAUDE.md`, `docs/ios/README.md` and `docs/ios/api.md`. First update CLAUDE.md's
 > environment notes for this Mac and fix `.claude/launch.json` for macOS. Then build the
 > native SwiftUI app in `ios/` following the build order in section 7, one step at a time:
-> after each step, build with `xcodebuild` for the iPhone 16 Pro simulator, run it against
-> the local API, and show me before moving on. Decode exactly the JSON in api.md. Follow the
+> after each step, build with `xcodebuild` for the connected iPhone (no Simulator), install
+> it, and let me check it against the PC's API before moving on. Decode exactly the JSON in api.md. Follow the
 > Live Activity lifecycle rules in section 6.

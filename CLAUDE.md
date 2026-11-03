@@ -176,16 +176,24 @@ cd web; npm run dev                      # web app on :3000 (also .claude/launch
 
 ## Environment Notes (this machine)
 
-- MacBook Air (Apple M1), macOS 27, default shell bash. Homebrew `python@3.12` (run as
-  `python3.12`), venv at `.venv/`. ffmpeg, gh, git and Ollama (cask) installed via Homebrew;
-  Xcode installed.
-- `node@22` is keg-only: `~/.bash_profile` adds `/opt/homebrew/opt/node@22/bin` to PATH.
-- Installed Ollama models: `qwen3.5:9b` (thinking-capable). `qwen2.5:7b` (the code default) is
-  not pulled; the local `.env` sets `RECIPE_OLLAMA_MODEL=qwen3.5:9b` instead. Ollama uses the
-  Apple GPU by itself.
-- Whisper runs on CPU/int8 (no CUDA on Macs).
-- Moved from the Windows PC on 2026-11-03 (215 tests pass, 89 ready recipes). Timings quoted
-  above ("~30-40s", "~2 min" per parse, OCR durations) were measured on that PC, not here.
+Two machines on the home Wi-Fi (user's decision, 2026-11-03: the 16 GB M1 struggled running
+everything):
+
+- **Windows PC = backend.** Pipeline (yt-dlp, faster-whisper, Ollama `qwen3.5:9b`), SQLite
+  (`data/recipes.db`) and `uvicorn api.app:app --host 0.0.0.0 --port 8000`. Ingest, `reparse`,
+  `import-page` and other data commands run there; it has the authoritative database. Changes
+  to `api/` or `db/` reach it via git (push here, pull there, restart uvicorn).
+- **MacBook Air (Apple M1, 16 GB) = development client only.** Xcode, Claude Code, git,
+  pytest. Do **not** run Ollama models, the pipeline, `uvicorn` or iOS Simulators here. Build
+  the iOS app for and run it on the physical iPhone (`xcodebuild ... -destination
+  'generic/platform=iOS'`, then `xcrun devicectl device install app`); the user checks the
+  screen, since Claude's simulator tools don't reach a real device. Keep background processes
+  to a minimum.
+- Mac details: macOS 27, default shell bash, Homebrew `python@3.12` (`python3.12`), venv at
+  `.venv/` (enough for pytest), Xcode 27. `node@22` is keg-only: `~/.bash_profile` adds
+  `/opt/homebrew/opt/node@22/bin` to PATH. Ollama is installed but should stay idle. The
+  Mac's `data/` is a stale copy from the brief 2026-11-03 move; don't treat it as current.
+- Timings quoted above ("~30-40s", "~2 min" per parse, OCR durations) were measured on the PC.
 
 ## Not Yet Verified / Open Items
 
