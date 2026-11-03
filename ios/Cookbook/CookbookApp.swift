@@ -31,12 +31,13 @@ struct CookbookApp: App {
             // Back in the app (including at launch): the Live Activity has done its job.
             case .active: Task { await LiveActivityController.endAll() }
             // Leaving: start while iOS still allows it (it refuses once in the background).
-            case .inactive: Task { await LiveActivityController.startOnLeave() }
+            case .inactive:
+                LiveActivityController.stayAwake(true)  // now, so closing the app soon can end the island
+                Task { await LiveActivityController.startOnLeave() }
             // Try again in case `.inactive` was missed; after Watch, show the expanded island once.
             case .background:
                 Task {
                     await LiveActivityController.startOnLeave()
-                    LiveActivityController.stayAwake(true)  // so closing the app soon can end it
                     await LiveActivityController.announce()
                 }
             @unknown default: break

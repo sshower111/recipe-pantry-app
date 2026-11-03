@@ -196,7 +196,12 @@ cd web; npm run dev                      # web app on :3000 (also .claude/launch
     (`Shared/CookingProgress.swift`, UserDefaults), shared with the Live Activity.
   - Live Activity (`CookingActivity/`): starts on "Watch on Instagram", or on leaving a recipe
     (`.inactive`; iOS refuses requests once in the background) if Settings' switch is on;
-    ends whenever the app is active again. iOS collapses the expanded island by itself, so a
+    ends whenever the app is active again, on the island's ✕ (`EndCookingIntent`), and when
+    the app is closed in the app switcher: iOS keeps activities after their app quits and
+    tells a suspended app nothing, so leaving (`.inactive`) starts a ~25 s background task
+    and willTerminate ends the activities (run loop kept turning, not a blocked main thread;
+    verified on the phone). Closed after that window, the ✕ is the way. iOS collapses the
+    expanded island by itself, so a
     silent alert (`Resources/silence.caf`) re-opens it on start and on every ‹ › tap.
     ‹ › run `ChangeStepIntent` (a LiveActivityIntent, so in the app's process: no App Group
     needed). Keep the Lock Screen card and expanded island under ~160 pt, or iOS crops them.

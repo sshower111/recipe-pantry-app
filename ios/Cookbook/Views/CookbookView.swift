@@ -446,22 +446,32 @@ struct CookbookView: View {
     @ViewBuilder
     private var removedBar: some View {
         if let recipe = removed {
-            HStack(spacing: 12) {
-                Text("Removed “\(recipe.title)”")
-                    .lineLimit(1)
-                    .foregroundStyle(.white)
+            // "Removed" on its own line, the title in full below it (two lines at most), so a
+            // long title isn't cut off mid-word behind "Removed …".
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Removed")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.65))
+                    Text(recipe.title)
+                        .font(.subheadline)
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Spacer(minLength: 8)
                 Button("Undo") {
                     removed = nil
                     Task { await store.unhide(recipe.id) }
                 }
-                .fontWeight(.semibold)
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Color.terracottaSoft)
+                .padding(.horizontal, 6)
+                .frame(minHeight: 44)
             }
-            .font(.subheadline)
             .padding(.horizontal, 18)
-            .padding(.vertical, 14)
-            .background(Color.ink, in: .capsule)
+            .padding(.vertical, 10)
+            .background(Color.ink, in: .rect(cornerRadius: 20))
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
             .transition(.move(edge: .bottom).combined(with: .opacity))

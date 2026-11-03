@@ -104,20 +104,25 @@ enum LiveActivityController {
     // MARK: Closing the app ends the island
     //
     // iOS keeps a Live Activity after its app is closed, and a suspended app gets no word when
-    // it's swiped away in the app switcher. So after leaving (with an island showing) the app
-    // stays awake ~25 s; closing it in that window (the usual "leave, then swipe it off")
-    // delivers willTerminate, which ends the island. Later, the island's ✕ does it.
+    // it's swiped away in the app switcher. So from the moment the app is left (`.inactive`,
+    // before the island even exists: it's requested a moment later) it stays awake ~25 s;
+    // closing it in that window (the usual "leave, then swipe it off") delivers willTerminate,
+    // which ends the island. Later, the island's ✕ does it.
 
     private static var awakeTask: UIBackgroundTaskIdentifier = .invalid
+    /// Bumped on each new window, so an older window's timer can't end a newer one.
+    private static var awakeWindow = 0
 
-    /// Called on `.background` (true) and on coming back or ending (false).
+    /// Called on leaving (true) and on coming back or ending (false).
     static func stayAwake(_ awake: Bool) {
         if awake {
-            guard awakeTask == .invalid, !Activity<CookingActivityAttributes>.activities.isEmpty else { return }
+            guard awakeTask == .invalid else { return }
+            awakeWindow += 1
+            let window = awakeWindow
             awakeTask = UIApplication.shared.beginBackgroundTask(withName: "end island on close") { stayAwake(false) }
             Task {
                 try? await Task.sleep(for: .seconds(25))
-                stayAwake(false)
+                if window == awakeWindow { stayAwake(false) }
             }
         } else if awakeTask != .invalid {
             UIApplication.shared.endBackgroundTask(awakeTask)
@@ -126,15 +131,21 @@ enum LiveActivityController {
     }
 
     /// willTerminate: end every activity before the process goes (iOS allows a few seconds).
+    /// Keeps the main run loop turning while it waits, in case ending needs the main thread
+    /// (blocking it with a semaphore could stall until the deadline and end nothing).
     static func endOnTermination() {
-        let done = DispatchSemaphore(value: 0)
+        final class Flag: @unchecked Sendable { var done = false }  // only touched on the main thread
+        let flag = Flag()
         Task.detached {
             for activity in Activity<CookingActivityAttributes>.activities {
                 await activity.end(nil, dismissalPolicy: .immediate)
             }
-            done.signal()
+            await MainActor.run { flag.done = true }
         }
-        _ = done.wait(timeout: .now() + 2)
+        let deadline = Date.now.addingTimeInterval(2)
+        while !flag.done, Date.now < deadline {
+            RunLoop.current.run(mode: .default, before: .now.addingTimeInterval(0.05))
+        }
     }
 }
 
