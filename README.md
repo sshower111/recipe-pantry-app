@@ -2,6 +2,8 @@
 
 A local pipeline that turns cooking shorts and reels into structured recipes and
 tells you what you can cook with what's in your pantry. Everything runs on your machine.
+A mobile-first web app ([Web app](#web-app)) lets you browse the recipes and cook along
+step by step, with the video beside you.
 
 ```
 URL ──yt-dlp──► metadata + captions + audio
@@ -204,6 +206,16 @@ cd web && npm install && npm run dev   # http://localhost:3000
   while you cook.
 - **Cooking mode**: one step at a time with only the ingredients that step mentions;
   "Done, next step" fades finished steps back. Progress is kept per device.
+- **Step timers**: when a step names a time ("bake for 28-32 minutes"), a
+  "Start 28 min timer" button counts it down.
+- **Dynamic Island step bar**: scroll away from the step card and a black pill at the top
+  keeps showing "Step 02/06" and the timer; tap it to open the step, its ingredients and
+  Previous / Next. It stays in sync with the main cooking mode.
+- **Live Activity (iOS, not yet built)**: a "Dynamic Island" switch and an "End cooking
+  session" button feed the current step to native iOS code in `web/native/ios/` (a
+  Capacitor plugin and widget extension that show the step on the Lock Screen and Dynamic
+  Island when you leave the app). That Swift code hasn't been compiled yet; in a browser
+  the switch only saves your preference.
 
 New ingests save their thumbnail automatically. Favorite/tried marks live in the
 `recipes` table and survive re-ingesting. Step ingredients are matched from the step's
