@@ -95,12 +95,15 @@ def init_db(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def connect(path: str | Path = ":memory:") -> sqlite3.Connection:
-    """Open a connection with foreign keys on and the schema applied."""
+def connect(path: str | Path = ":memory:", *, check_same_thread: bool = True) -> sqlite3.Connection:
+    """Open a connection with foreign keys on and the schema applied.
+
+    ``check_same_thread=False`` is for the API, whose request connections may be opened
+    and closed on different worker threads (still used by one request at a time)."""
     on_disk = str(path) != ":memory:"
     if on_disk:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path))
+    conn = sqlite3.connect(str(path), check_same_thread=check_same_thread)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     if on_disk:

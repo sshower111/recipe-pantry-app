@@ -37,7 +37,10 @@ def create_app(db_path: str | Path, thumbnails_dir: Path, staples: tuple[str, ..
     app = FastAPI(title="Recipe Pantry API")
 
     def db() -> Iterator[sqlite3.Connection]:
-        conn = connect(db_path)
+        # FastAPI may run this dependency's setup and teardown on different threadpool
+        # threads; with the default check, close() then fails and the request turns into
+        # a 500 (seen when the iOS feed loads many thumbnails at once).
+        conn = connect(db_path, check_same_thread=False)
         try:
             yield conn
         finally:

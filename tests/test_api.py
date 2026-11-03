@@ -66,6 +66,20 @@ def test_thumbnail_served(client):
     assert client.get("/api/recipes/2/thumbnail").status_code == 404
 
 
+def test_db_connection_closes_on_another_thread(client):
+    # Under uvicorn, FastAPI can run the db dependency's setup and teardown on different
+    # threadpool threads; that used to raise sqlite3.ProgrammingError (HTTP 500).
+    from concurrent.futures import ThreadPoolExecutor
+
+    route = next(r for r in client.app.routes if getattr(r, "path", "") == "/api/recipes/{recipe_id}/thumbnail")
+    db = next(d.call for d in route.dependant.dependencies if d.call.__name__ == "db")
+    session = db()
+    with ThreadPoolExecutor(1) as opener:
+        opener.submit(next, session).result()
+    with pytest.raises(StopIteration):
+        next(session)
+
+
 def test_pantry_ranks_and_skips_staples(client, tmp_path):
     conn = connect(tmp_path / "recipes.db")
     save_recipe(conn, source_url="https://x/eggs", title="Garlic Eggs",
