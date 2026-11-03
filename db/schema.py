@@ -63,6 +63,9 @@ CREATE TABLE IF NOT EXISTS recipe_steps (
     recipe_id INTEGER NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
     position  INTEGER NOT NULL,
     text      TEXT NOT NULL,
+    -- A model-written version of about 40-60 characters for the iOS Dynamic Island and
+    -- Lock Screen (NULL until `main.py shorten-steps` or a parse fills it).
+    short_text TEXT,
     PRIMARY KEY (recipe_id, position)
 );
 
@@ -83,6 +86,7 @@ _ADDED_COLUMNS = [
     ("recipes", "thumbnail_file", "TEXT"),
     ("recipes", "favorite", "INTEGER NOT NULL DEFAULT 0"),
     ("recipes", "tried", "INTEGER NOT NULL DEFAULT 0"),
+    ("recipe_steps", "short_text", "TEXT"),
 ]
 
 

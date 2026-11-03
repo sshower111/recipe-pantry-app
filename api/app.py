@@ -90,7 +90,10 @@ def create_app(db_path: str | Path, thumbnails_dir: Path, staples: tuple[str, ..
             "recipe_page_url": r["recipe_page_url"],
             "video": _video(r["source_url"]),
             "ingredients": r["ingredients"],
-            "steps": [{"text": text, "ingredients": used} for text, used in zip(r["steps"], uses)],
+            "steps": [
+                {"text": text, "short_text": short, "ingredients": used}
+                for text, short, used in zip(r["steps"], r["short_steps"], uses)
+            ],
         }
 
     @app.patch("/api/recipes/{recipe_id}")

@@ -8,10 +8,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+import requests
+
 from config import Settings, settings as default_settings
-from db import find_recipe_id, get_recipe, save_recipe, set_status_note
+from db import find_recipe_id, get_recipe, save_recipe, set_short_steps, set_status_note
 from pipeline.downloader import MediaAssets, download_media, download_video
-from pipeline.parser import ParsedRecipe, parse_recipe
+from pipeline.parser import OllamaError, ParsedRecipe, parse_recipe, shorten_steps
 from pipeline.thumbnails import save_thumbnail
 from pipeline.urls import canonical_url, classify_missing_recipe, recipe_link
 from pipeline.webrecipe import RecipePageError, WebRecipe, fetch_recipe_page, read_recipe_file
@@ -153,6 +155,22 @@ def _parse(inputs: ParseInputs, cfg: Settings) -> ParsedRecipe:
     )
 
 
+def short_steps(steps: list[str], ingredients: list[str], cfg: Settings) -> list[str | None]:
+    """Island versions of ``steps``; a failure is logged and leaves them empty (the app
+    falls back to shortening the full text itself), never failing the save."""
+    if not steps:
+        return []
+    log.info("Shortening %d steps with %s", len(steps), cfg.ollama_model)
+    try:
+        return shorten_steps(
+            steps, ingredients=ingredients, model=cfg.ollama_model, base_url=cfg.ollama_url,
+            timeout=cfg.ollama_timeout, num_ctx=cfg.ollama_num_ctx, think=cfg.ollama_think,
+        )
+    except (OllamaError, requests.RequestException) as exc:
+        log.warning("Steps not shortened: %s", exc)
+        return []
+
+
 # Placeholders the model sometimes writes instead of an empty title.
 _NO_TITLE = {"", "none", "null", "n/a", "untitled", "unknown"}
 
@@ -227,6 +245,7 @@ def ingest_url(
             title=title,
             ingredients=[i.model_dump() for i in recipe.ingredients],
             steps=recipe.steps,
+            short_steps=short_steps(recipe.steps, [i.name for i in recipe.ingredients], cfg),
             yield_label=recipe.yield_label,
             ingredient_sources=sources,
             video_id=media.video_id,
@@ -333,6 +352,7 @@ def reparse_recipe(
         title=title,
         ingredients=[i.model_dump() for i in recipe.ingredients],
         steps=recipe.steps,
+        short_steps=short_steps(recipe.steps, [i.name for i in recipe.ingredients], cfg),
         yield_label=recipe.yield_label,
         ingredient_sources=sources,
         video_id=stored["video_id"],
@@ -359,3 +379,21 @@ def reparse_recipe(
         recipe_status=status,
         status_note=None if recipe.ingredients else stored["status_note"],
     )
+
+
+def shorten_recipe_steps(conn: sqlite3.Connection, recipe_id: int, cfg: Settings = default_settings) -> list[str | None]:
+    """Fill a stored recipe's island step versions from its saved steps; ingredients and
+    the full steps are left alone. Raises ValueError / OllamaError."""
+    stored = get_recipe(conn, recipe_id)
+    if stored is None:
+        raise ValueError(f"No recipe with id {recipe_id}")
+    if not stored["steps"]:
+        raise ValueError(f"Recipe {recipe_id} has no steps")
+    log.info("Shortening %d steps with %s", len(stored["steps"]), cfg.ollama_model)
+    shorts = shorten_steps(
+        stored["steps"], ingredients=[i["raw_name"] for i in stored["ingredients"]],
+        model=cfg.ollama_model, base_url=cfg.ollama_url, timeout=cfg.ollama_timeout,
+        num_ctx=cfg.ollama_num_ctx, think=cfg.ollama_think,
+    )
+    set_short_steps(conn, recipe_id, shorts)
+    return shorts

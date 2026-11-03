@@ -2,12 +2,13 @@
 
 import dataclasses
 import json
+import sqlite3
 
 import pytest
 
 import main
 from config import settings
-from db import connect, get_recipe, save_recipe
+from db import connect, get_recipe, save_recipe, set_short_steps
 from pipeline import ingest, parser
 from pipeline.parser import Ingredient, ParsedRecipe
 from pipeline.webrecipe import WebRecipe, recipe_from_html, recipe_from_text
@@ -201,3 +202,138 @@ def test_import_page_defaults_to_previously_imported_page(stored, monkeypatch):
     assert fetched == ["https://blog.example.com/bb/"]
     assert "Instructions:\n1. Mash.\n2. Bake." in calls[0]["recipe_page"]
     assert "Instructions:" in get_recipe(conn, rid)["recipe_page_text"]
+
+
+# --- short (island) steps -----------------------------------------------------------------------
+
+def test_short_steps_are_stored_by_position(tmp_path):
+    conn = connect(":memory:")
+    rid = save_recipe(conn, source_url="https://example.com/t", title="Toast", ingredients=[{"name": "bread"}],
+                      steps=["Toast the bread.", "  ", "Butter it while hot."],
+                      short_steps=["Toast the bread", None, "Butter it"])
+    # The blank step is dropped together with its short version.
+    assert get_recipe(conn, rid)["short_steps"] == ["Toast the bread", "Butter it"]
+    save_recipe(conn, source_url="https://example.com/t", title="Toast", ingredients=[{"name": "bread"}],
+                steps=["Toast the bread.", "Butter it while hot."])
+    assert get_recipe(conn, rid)["short_steps"] == [None, None]
+    set_short_steps(conn, rid, ["Toast", "Butter"])
+    after = get_recipe(conn, rid)
+    assert after["short_steps"] == ["Toast", "Butter"]
+    assert after["steps"] == ["Toast the bread.", "Butter it while hot."]
+
+
+def test_old_database_gets_short_text_column(tmp_path):
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.executescript(
+        """
+        CREATE TABLE recipes (id INTEGER PRIMARY KEY, source_url TEXT NOT NULL UNIQUE, title TEXT NOT NULL);
+        CREATE TABLE recipe_steps (recipe_id INTEGER NOT NULL, position INTEGER NOT NULL, text TEXT NOT NULL,
+                                   PRIMARY KEY (recipe_id, position));
+        INSERT INTO recipes VALUES (1, 'https://example.com/old', 'Old');
+        INSERT INTO recipe_steps VALUES (1, 0, 'Stir.');
+        """
+    )
+    old.close()
+    conn = connect(path)
+    assert get_recipe(conn, 1)["short_steps"] == [None]
+
+
+class FakeResponse:
+    def __init__(self, content):
+        self.status_code = 200
+        self._content = content
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return {"message": {"content": self._content}}
+
+
+def test_shorten_steps_retries_on_wrong_count_and_cleans(monkeypatch):
+    steps = ["In a bowl, mix together hoisin sauce, bean sauce, sugar and ginger powder.",
+             "Bake at 170°C for 40-45 minutes until cooked through.", "Stir."]
+    answers = iter([
+        json.dumps({"step_1": "Mix the sauce ingredients"}),
+        json.dumps({"step_1": "Mix the sauce ingredients.", "step_2": "Bake at 170°C for 40-45 min",
+                    "step_3": "Stir well now"}),
+    ])
+    sent = []
+
+    def fake_post(url, json, timeout):
+        sent.append(json)
+        return FakeResponse(next(answers))
+
+    monkeypatch.setattr(parser.requests, "post", fake_post)
+    shorts = parser.shorten_steps(steps, ingredients=["hoisin sauce", "bean sauce"])
+    # Trailing period dropped; a "short" version longer than the step is not kept.
+    assert shorts == ["Mix the sauce ingredients", "Bake at 170°C for 40-45 min", None]
+    assert len(sent) == 2
+    assert sent[0]["format"]["required"] == ["step_1", "step_2", "step_3"]
+    assert sent[0]["think"] is False and sent[0]["options"]["temperature"] == 0
+    user = sent[0]["messages"][1]["content"]
+    assert "- hoisin sauce" in user and "STEPS (3):\n1. In a bowl" in user
+
+
+def test_shorten_steps_gives_up_after_retries(monkeypatch):
+    monkeypatch.setattr(parser.requests, "post",
+                        lambda url, json, timeout: FakeResponse('{"step_1": "Stir"}'))
+    with pytest.raises(parser.OllamaError, match="step_2"):
+        parser.shorten_steps(["Stir the pot.", "Serve it hot."])
+    assert parser.shorten_steps([]) == []
+
+
+def test_reparse_saves_short_steps(stored, monkeypatch):
+    conn, rid = stored
+    fake_parse(monkeypatch, FULL)
+    seen = []
+    monkeypatch.setattr(ingest, "shorten_steps",
+                        lambda steps, **kw: seen.append(kw["ingredients"]) or ["Mash", "Bake at 350°F"])
+    ingest.reparse_recipe(conn, rid, settings)
+    assert get_recipe(conn, rid)["short_steps"] == ["Mash", "Bake at 350°F"]
+    assert seen == [["banana", "flour", "egg"]]
+
+
+def test_shortening_failure_never_fails_reparse(stored, monkeypatch):
+    conn, rid = stored
+    fake_parse(monkeypatch, FULL)
+
+    def down(steps, **kwargs):
+        raise parser.OllamaError("Cannot reach Ollama")
+
+    monkeypatch.setattr(ingest, "shorten_steps", down)
+    ingest.reparse_recipe(conn, rid, settings)
+    after = get_recipe(conn, rid)
+    assert after["steps"] == ["Mash the bananas.", "Bake at 350°F."]
+    assert after["short_steps"] == [None, None]
+
+
+def test_cli_shorten_steps_fills_only_missing(monkeypatch, tmp_path, capsys):
+    path = tmp_path / "recipes.db"
+    monkeypatch.setattr(main, "settings", dataclasses.replace(main.settings, db_path=path))
+    conn = connect(path)
+    todo = save_recipe(conn, source_url="https://example.com/a", title="Toast",
+                       ingredients=[{"name": "bread", "amount": 2}], steps=["Toast the bread slices.", "Stir."])
+    done = save_recipe(conn, source_url="https://example.com/b", title="Tea", ingredients=[{"name": "tea"}],
+                       steps=["Steep the tea bag."], short_steps=["Steep the tea"])
+    save_recipe(conn, source_url="https://example.com/c", title="No steps", ingredients=[{"name": "egg"}])
+    conn.close()
+    calls = []
+    monkeypatch.setattr(ingest, "shorten_steps", lambda steps, **kw: calls.append(steps) or ["Toast the bread", None])
+
+    assert main.main(["shorten-steps"]) == 0
+    assert calls == [["Toast the bread slices.", "Stir."]]
+    out = capsys.readouterr().out
+    assert "1/1 [1] Toast" in out and "    Toast the bread" in out and "(kept: Stir.)" in out
+    conn = connect(path)
+    recipe = get_recipe(conn, todo)
+    assert recipe["short_steps"] == ["Toast the bread", None]
+    assert [(i["name"], i["amount"]) for i in recipe["ingredients"]] == [("bread", 2)]
+    assert get_recipe(conn, done)["short_steps"] == ["Steep the tea"]
+    conn.close()
+
+    # The not-shortened "Stir." keeps Toast on the to-do list; ids pick recipes explicitly.
+    calls.clear()
+    assert main.main(["shorten-steps", str(done)]) == 0
+    assert calls == [["Steep the tea bag."]]

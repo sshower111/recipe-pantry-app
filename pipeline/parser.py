@@ -8,7 +8,7 @@ import re
 from typing import Any, Literal
 
 import requests
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, ValidationError, create_model, field_validator
 
 log = logging.getLogger(__name__)
 
@@ -244,3 +244,71 @@ def parse_recipe(
             log.warning("Attempt %d: model output failed validation: %s", attempt, exc)
             last_error = exc
     raise OllamaError(f"Model output never validated: {last_error}")
+
+
+SHORTEN_PROMPT = """\
+You shorten recipe steps for a phone's lock screen, which fits about two short lines.
+
+You get the recipe's ingredient list and its numbered steps. Return JSON with one key per
+step, "step_1", "step_2", ...: the short version of that step only.
+
+Rules:
+- At most 50 characters each; plain English imperative ("Fold in the flour").
+- Keep the action, and any quantities, temperatures, times and pan sizes the step gives
+  ("Bake at 170°C for 40-45 minutes until golden." -> "Bake at 170°C for 40-45 min").
+- Drop lists of ingredients the ingredient list already shows; name the group instead
+  ("In a bowl, mix together hoisin sauce, bean sauce, sugar, ... ginger powder." ->
+  "Mix the sauce ingredients"). Keep a single named ingredient ("Add the garlic").
+- Drop asides, reasons, tips and doneness descriptions when they don't fit.
+- No numbering and no final period. Never add anything the step doesn't say.
+"""
+
+
+def build_shorten_messages(steps: list[str], ingredients: list[str]) -> list[dict[str, str]]:
+    listed = "\n".join(f"- {name}" for name in ingredients) or "(none)"
+    numbered = "\n".join(f"{n}. {step}" for n, step in enumerate(steps, 1))
+    user = f"INGREDIENTS:\n{listed}\n\nSTEPS ({len(steps)}):\n{numbered}"
+    return [{"role": "system", "content": SHORTEN_PROMPT}, {"role": "user", "content": user}]
+
+
+def _clean_short(short: str, step: str) -> str | None:
+    """None when the model gave nothing useful (the app then shortens ``step`` itself)."""
+    short = short.strip().rstrip(".").strip()
+    return short if short and len(short) < len(step) else None
+
+
+def shorten_steps(
+    steps: list[str],
+    *,
+    ingredients: list[str] = (),
+    model: str = "qwen2.5:7b",
+    base_url: str = "http://localhost:11434",
+    timeout: float = 180,
+    num_ctx: int = 8192,
+    think: bool | None = False,
+    attempts: int = 2,
+) -> list[str | None]:
+    """Ask the model for a ~50-character version of each step, for the iOS Dynamic Island.
+    A separate, small call (steps and ingredient names only), so stored recipes can be
+    shortened without parsing their text again. A step whose version is empty or not
+    shorter comes back None."""
+    if not steps:
+        return []
+    payload = build_payload(build_shorten_messages(list(steps), list(ingredients)),
+                            model=model, num_ctx=num_ctx, think=think)
+    # One required key per step: a plain list let the model merge all the steps into one item.
+    keys = [f"step_{n}" for n in range(1, len(steps) + 1)]
+    answer = create_model("ShortSteps", **{key: (str, ...) for key in keys})
+    payload["format"] = answer.model_json_schema()
+
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        content = call_ollama(payload, base_url=base_url, timeout=timeout)
+        try:
+            shorts = answer.model_validate_json(content)
+        except ValidationError as exc:
+            log.warning("Attempt %d: short steps failed validation: %s", attempt, exc)
+            last_error = exc
+            continue
+        return [_clean_short(getattr(shorts, key), step) for key, step in zip(keys, steps)]
+    raise OllamaError(f"Short steps never validated: {last_error}")

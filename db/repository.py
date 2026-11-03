@@ -22,6 +22,7 @@ def save_recipe(
     title: str,
     ingredients: Iterable[Mapping[str, Any]],
     steps: Iterable[str] = (),
+    short_steps: Iterable[str | None] = (),
     yield_label: str | None = None,
     ingredient_sources: Iterable[str] = (),
     video_id: str | None = None,
@@ -45,6 +46,8 @@ def save_recipe(
     A recipe with ingredient lines is always ``ready``. Without any, ``status`` says why
     (``needs_recipe`` or ``not_recipe``; left NULL if not given, for ``backfill_status``)
     and ``status_note`` can give details.
+
+    ``short_steps`` are the island versions of ``steps``, by position (missing ones are NULL).
     """
     sources = ",".join(dict.fromkeys(s for s in ingredient_sources if s)) or None
 
@@ -78,9 +81,11 @@ def save_recipe(
 
         conn.execute("DELETE FROM recipe_ingredients WHERE recipe_id = ?", (recipe_id,))
         conn.execute("DELETE FROM recipe_steps WHERE recipe_id = ?", (recipe_id,))
+        shorts = list(short_steps)
+        pairs = [((t or "").strip(), shorts[n] if n < len(shorts) else None) for n, t in enumerate(steps)]
         conn.executemany(
-            "INSERT INTO recipe_steps (recipe_id, position, text) VALUES (?, ?, ?)",
-            [(recipe_id, n, text) for n, text in enumerate(t.strip() for t in steps if t and t.strip())],
+            "INSERT INTO recipe_steps (recipe_id, position, text, short_text) VALUES (?, ?, ?, ?)",
+            [(recipe_id, n, text, short) for n, (text, short) in enumerate(p for p in pairs if p[0])],
         )
 
         position = 0
@@ -215,12 +220,21 @@ def get_recipe(conn: sqlite3.Connection, recipe_id: int) -> dict[str, Any] | Non
             (recipe_id,),
         )
     ]
-    recipe["steps"] = [
-        r[0] for r in conn.execute(
-            "SELECT text FROM recipe_steps WHERE recipe_id = ? ORDER BY position", (recipe_id,)
-        )
-    ]
+    rows = conn.execute(
+        "SELECT text, short_text FROM recipe_steps WHERE recipe_id = ? ORDER BY position", (recipe_id,)
+    ).fetchall()
+    recipe["steps"] = [r[0] for r in rows]
+    recipe["short_steps"] = [r[1] for r in rows]  # None where not shortened yet
     return recipe
+
+
+def set_short_steps(conn: sqlite3.Connection, recipe_id: int, short_steps: Iterable[str | None]) -> None:
+    """Store the island versions of a recipe's steps, by position; nothing else changes."""
+    with conn:
+        conn.executemany(
+            "UPDATE recipe_steps SET short_text = ? WHERE recipe_id = ? AND position = ?",
+            [(short, recipe_id, n) for n, short in enumerate(short_steps)],
+        )
 
 
 def list_recipes(conn: sqlite3.Connection, statuses: Iterable[str] | None = None) -> list[dict[str, Any]]:

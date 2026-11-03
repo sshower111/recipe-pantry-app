@@ -104,7 +104,8 @@ enum LiveActivityController {
 extension CookingSnapshot {
     init(_ recipe: Recipe) {
         self.init(recipeId: recipe.id, title: recipe.title, steps: recipe.steps.map { step in
-            Step(text: step.islandText, ingredients: step.ingredients.compactMap { index in
+            // The island fits about two lines: the server's short version, else the rule-based one.
+            Step(text: step.shortText ?? step.islandText, ingredients: step.ingredients.compactMap { index in
                 guard recipe.ingredients.indices.contains(index) else { return nil }
                 let ingredient = recipe.ingredients[index]
                 return [ingredient.quantity, ingredient.label].filter { !$0.isEmpty }.joined(separator: " ")

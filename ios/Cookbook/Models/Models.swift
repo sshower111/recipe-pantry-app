@@ -49,6 +49,7 @@ nonisolated struct Ingredient: Codable, Hashable {
 
 nonisolated struct Step: Codable, Hashable {
     let text: String
+    let shortText: String?       // model-written island version (~50 chars); nil until shortened
     let ingredients: [Int]       // indexes into Recipe.ingredients
 }
 
