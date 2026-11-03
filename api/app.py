@@ -17,7 +17,8 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from api.jobs import IngestQueue
-from db import connect, find_recipes_by_pantry, get_recipe, list_recipes, match_step_ingredients, set_marks
+from db import (connect, find_recipes_by_pantry, get_recipe, list_recipes, match_step_ingredients, set_marks,
+                set_status)
 from pipeline.urls import canonical_url, embed_url
 
 _STATUSES = {"ready": ["ready"], "todo": ["needs_recipe"], "all": None}
@@ -27,11 +28,16 @@ _LINK = re.compile(r"https?://\S+")
 class Marks(BaseModel):
     favorite: bool | None = None
     tried: bool | None = None
+    # Only for posts without an ingredient list: keep it (needs_recipe) or hide it (not_recipe).
+    status: Literal["needs_recipe", "not_recipe"] | None = None
 
 
 class IngestRequest(BaseModel):
     # A link, or shared text containing one ("Check this out! https://vt.tiktok.com/...").
     url: str
+    # Re-download and re-read a post already stored ("Check again"); otherwise stored posts
+    # finish at once as "skipped".
+    refresh: bool = False
 
 
 def _video(source_url: str) -> dict[str, Any]:
@@ -112,11 +118,18 @@ def create_app(
         }
 
     @app.patch("/api/recipes/{recipe_id}")
-    def mark(recipe_id: int, marks: Marks, conn: sqlite3.Connection = Depends(db)) -> dict[str, bool]:
+    def mark(recipe_id: int, marks: Marks, conn: sqlite3.Connection = Depends(db)) -> dict[str, Any]:
+        if marks.status is not None:
+            try:
+                if set_status(conn, recipe_id, marks.status) is None:
+                    raise HTTPException(404, "Recipe not found")
+            except ValueError as exc:
+                raise HTTPException(409, str(exc)) from exc
         result = set_marks(conn, recipe_id, favorite=marks.favorite, tried=marks.tried)
         if result is None:
             raise HTTPException(404, "Recipe not found")
-        return result
+        status = conn.execute("SELECT status FROM recipes WHERE id = ?", (recipe_id,)).fetchone()[0]
+        return {**result, "status": status}
 
     @app.get("/api/ingredients")
     def ingredients(conn: sqlite3.Connection = Depends(db)) -> list[dict[str, Any]]:
@@ -183,7 +196,7 @@ def create_app(
         link = _LINK.search(body.url)
         if not link:
             raise HTTPException(422, "No link found; share a post's link (https://...)")
-        return ingest_jobs().submit(link.group(0).rstrip(".,)")).to_json()
+        return ingest_jobs().submit(link.group(0).rstrip(".,)"), refresh=body.refresh).to_json()
 
     @app.get("/api/ingest")
     def ingest_list() -> list[dict[str, Any]]:
@@ -199,18 +212,27 @@ def create_app(
     return app
 
 
-def _ingest_with_settings(url: str) -> Any:
-    """One shared link through the same pipeline as `main.py ingest --skip-existing`, on its
-    own connection (it runs on the queue's worker thread)."""
+def _ingest_with_settings(url: str, refresh: bool = False) -> Any:
+    """One shared link through the same pipeline as `main.py ingest --skip-existing` (or a
+    plain re-ingest with ``refresh``), on its own connection (it runs on the queue's worker
+    thread)."""
     from config import settings
-    from db import backfill_status
+    from db import backfill_status, find_recipe_id
     from pipeline.ingest import ingest_url
-    from pipeline.urls import classify_missing_recipe
+    from pipeline.urls import canonical_url, classify_missing_recipe
 
     conn = connect(settings.db_path)
     try:
-        result = ingest_url(url, conn, settings, skip_existing=True)
+        before = find_recipe_id(conn, canonical_url(url))
+        kept = before is not None and conn.execute(
+            "SELECT status FROM recipes WHERE id = ?", (before,)).fetchone()[0] == "needs_recipe"
+        result = ingest_url(url, conn, settings, skip_existing=not refresh)
         backfill_status(conn, classify_missing_recipe)  # label posts without a list, as the CLI does
+        if kept:
+            # Saved for later in the app: "Check again" finding no recipe yet keeps it there.
+            conn.execute("UPDATE recipes SET status = 'needs_recipe' WHERE id = ? AND status = 'not_recipe'",
+                         (result.recipe_id,))
+            conn.commit()
         row = conn.execute("SELECT status, title FROM recipes WHERE id = ?", (result.recipe_id,)).fetchone()
         if row:
             result.recipe_status = result.recipe_status or row[0]

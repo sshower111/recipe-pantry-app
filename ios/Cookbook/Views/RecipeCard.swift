@@ -10,6 +10,7 @@ struct RecipeCard: View {
     let onToggleFavorite: () -> Void
 
     private var meta: String {
+        if recipe.ingredientCount == 0 { return "No recipe yet" }  // kept in 🔖 Saved
         var parts = ["\(recipe.ingredientCount) ingredients"]
         if recipe.stepCount > 0 { parts.append("\(recipe.stepCount) steps") }
         return parts.joined(separator: " · ")

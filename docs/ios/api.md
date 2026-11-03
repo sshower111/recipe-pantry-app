@@ -39,11 +39,11 @@ and an uploader, but the schema allows null for both. 280 of 921 ingredient line
 |---|---|---|
 | GET | `/api/recipes` | Cookbook list (`?status=ready\|todo\|all`, default `ready`) |
 | GET | `/api/recipes/{id}` | One recipe with ingredients, steps (+ step ingredient indexes), video |
-| PATCH | `/api/recipes/{id}` | Set `{"favorite": bool}` and/or `{"tried": bool}`; returns both |
+| PATCH | `/api/recipes/{id}` | Set `{"favorite": bool}`, `{"tried": bool}` and/or `{"status": "needs_recipe" \| "not_recipe"}`; returns all three |
 | GET | `/api/recipes/{id}/thumbnail` | The image (JPEG/PNG/WebP); 404 if none |
 | GET | `/api/ingredients` | Canonical ingredient names used by ready recipes, most used first |
 | GET | `/api/pantry?have=a&have=b` | Recipes using what you have (repeat `have`); `limit`, `include_staples` |
-| POST | `/api/ingest` | `{"url": "<link or text containing one>"}`: queue a post to add; 202 with the job |
+| POST | `/api/ingest` | `{"url": "<link or text containing one>", "refresh": false}`: queue a post to add; 202 with the job |
 | GET | `/api/ingest` | Recent jobs, newest first (in memory: a uvicorn restart clears them) |
 | GET | `/api/ingest/{job_id}` | One job; poll it until `status` is `done` or `failed` |
 
@@ -62,7 +62,9 @@ that job. A job looks like:
 `status`: `queued` | `running` | `done` | `failed` (`message` says why). `result`: `added` |
 `updated` | `skipped`. `recipe_status`: `ready` (has ingredients), `needs_recipe` (the post
 points elsewhere; `message` may say why the page failed) or `not_recipe`. 422 when the text has
-no link; 503 when the server runs without the pipeline (tests).
+no link; 503 when the server runs without the pipeline (tests). `"refresh": true` re-downloads
+a stored post (the app's "Check again"); a post saved as `needs_recipe` stays `needs_recipe`
+if it still has no list.
 
 Pantry search normalizes on the server ("2 large eggs" -> `egg`), so send what the user typed.
 Staples (salt, black pepper, water, oil) are ignored unless `include_staples=true`. Results
@@ -257,9 +259,14 @@ with the first letter capitalised, captions with `#hashtags` stripped.
 ```json
 {
   "favorite": true,
-  "tried": true
+  "tried": true,
+  "status": "ready"
 }
 ```
+
+`status` relabels a post **without** an ingredient list: `needs_recipe` keeps it in the app's
+Saved list (`GET /api/recipes?status=todo`; the recipe is elsewhere or still coming),
+`not_recipe` hides it. A recipe with ingredients answers 409 (it is always `ready`).
 
 ### `GET /api/ingredients`
 

@@ -140,6 +140,26 @@ def set_marks(
     return None if row is None else {"favorite": bool(row[0]), "tried": bool(row[1])}
 
 
+def set_status(conn: sqlite3.Connection, recipe_id: int, status: str) -> str | None:
+    """Relabel a post without an ingredient list: ``needs_recipe`` (keep it, the recipe is
+    elsewhere or coming) or ``not_recipe``. Returns the status, None if there is no such
+    recipe. Raises ValueError for a recipe that has ingredients (those are always ``ready``)."""
+    if status not in ("needs_recipe", "not_recipe"):
+        raise ValueError(f"status must be needs_recipe or not_recipe, not {status!r}")
+    row = conn.execute(
+        "SELECT r.id, COUNT(ri.id) FROM recipes r LEFT JOIN recipe_ingredients ri ON ri.recipe_id = r.id"
+        " WHERE r.id = ? GROUP BY r.id",
+        (recipe_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    if row[1]:
+        raise ValueError("this recipe has an ingredient list, so it stays ready")
+    with conn:
+        conn.execute("UPDATE recipes SET status = ? WHERE id = ?", (status, recipe_id))
+    return status
+
+
 def backfill_status(conn: sqlite3.Connection, classify_empty: Callable[[str | None], str]) -> int:
     """Set ``status`` on rows saved before it existed. Rows with ingredients are ``ready``;
     ``classify_empty(description)`` decides the rest. Returns the number of rows updated."""

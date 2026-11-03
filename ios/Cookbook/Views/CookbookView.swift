@@ -22,9 +22,10 @@ struct CookbookView: View {
     /// The server's default RECIPE_PANTRY_STAPLES: never scored, so not worth suggesting.
     private static let staples: Set<String> = ["salt", "black pepper", "water", "oil"]
 
-    /// "Cooked" is the API's `tried` mark. The raw value is the accessibility name.
+    /// "Cooked" is the API's `tried` mark; "Saved" lists posts kept without a recipe yet
+    /// (`needs_recipe`). The raw value is the accessibility name.
     enum Filter: String, CaseIterable, Identifiable {
-        case all = "All", favorites = "Favorites", cooked = "Cooked"
+        case all = "All", favorites = "Favorites", cooked = "Cooked", saved = "Saved for later"
         var id: Self { self }
 
         /// What the chip shows.
@@ -33,12 +34,13 @@ struct CookbookView: View {
             case .all: "All"
             case .favorites: "❤️"
             case .cooked: "👌🎉"
+            case .saved: "🔖"
             }
         }
 
         func matches(_ recipe: RecipeSummary) -> Bool {
             switch self {
-            case .all: true
+            case .all, .saved: true
             case .favorites: recipe.favorite
             case .cooked: recipe.tried
             }
@@ -49,12 +51,15 @@ struct CookbookView: View {
         savedPicks.split(separator: "\n").map(String.init)
     }
 
-    /// The feed: every recipe (title search), or with picks, the pantry ranking.
+    /// The feed: every recipe (title search), or with picks, the pantry ranking; 🔖 shows the
+    /// posts saved for later instead (no ingredients, so picks don't apply).
     private var shown: [(recipe: RecipeSummary, match: PantryMatch?)] {
         let words = query.lowercased().split(whereSeparator: \.isWhitespace)
         let recipes = store.recipes ?? []
         let ranked: [(RecipeSummary, PantryMatch?)]
-        if picks.isEmpty {
+        if filter == .saved {
+            ranked = store.saved.map { ($0, nil) }
+        } else if picks.isEmpty {
             ranked = recipes.map { ($0, nil) }
         } else {
             let byId = Dictionary(uniqueKeysWithValues: recipes.map { ($0.id, $0) })
@@ -156,6 +161,9 @@ struct CookbookView: View {
 
     private var subtitle: String {
         guard let recipes = store.recipes else { return "Your saved recipes, all in one place" }
+        if filter == .saved {
+            return store.saved.count == 1 ? "1 post waiting for its recipe" : "\(store.saved.count) posts waiting for their recipe"
+        }
         if !picks.isEmpty, let matches { return "\(matches.count) recipes use what you have" }
         return "\(recipes.count) recipes saved from your reels"
     }
@@ -294,7 +302,9 @@ struct CookbookView: View {
     private var sharedPosts: some View {
         VStack(spacing: 10) {
             ForEach(store.ingestJobs) { job in
-                if job.status == "done", let id = job.recipeId, job.recipeStatus == "ready" {
+                // Open the recipe once there's one to open: ready, or kept in 🔖 Saved.
+                if job.status == "done", let id = job.recipeId,
+                   job.recipeStatus == "ready" || store.saved.contains(where: { $0.id == id }) {
                     NavigationLink(value: id) { jobRow(job) }
                         .buttonStyle(.plain)
                 } else {
@@ -306,15 +316,24 @@ struct CookbookView: View {
 
     private func jobRow(_ job: IngestJob) -> some View {
         let source = URL(string: job.url)?.host()?.replacing("www.", with: "") ?? "a link"
+        let kept = job.recipeId.map { id in store.saved.contains { $0.id == id } } ?? false
+        let checkingAgain = job.refresh == true
         let (title, detail): (String, String) = switch (job.status, job.result, job.recipeStatus) {
-        case ("queued", _, _): ("Waiting to add from \(source)", "Your PC adds shared posts one at a time.")
-        case ("running", _, _): ("Adding from \(source)…", "Your PC is reading the video. A couple of minutes.")
+        case ("queued", _, _): (checkingAgain ? "Waiting to check \(source) again" : "Waiting to add from \(source)",
+                                "Your PC reads shared posts one at a time.")
+        case ("running", _, _): (checkingAgain ? "Checking \(source) again…" : "Adding from \(source)…",
+                                 "Your PC is reading the video. A couple of minutes.")
         case ("failed", _, _): ("Couldn't add a post from \(source)", job.message ?? "The PC couldn't read it.")
+        case (_, _, "ready") where job.result != "skipped" || checkingAgain:
+            ("Added: \(job.title ?? "new recipe")", "Tap to open it.")
         case (_, "skipped", _): ("Already saved: \(job.title ?? source)", "It's in your cookbook.")
-        case (_, _, "ready"): ("Added: \(job.title ?? "new recipe")", "Tap to open it.")
-        case (_, _, "needs_recipe"): ("Saved without a recipe: \(job.title ?? source)",
-                                      "The post points to a blog or bio link; add it on the PC with import-page.")
-        default: ("Not a recipe: \(job.title ?? source)", "No ingredient list in that post.")
+        case _ where kept: ("No recipe yet: \(job.title ?? source)",
+                            checkingAgain ? "Still nothing to read. It stays in 🔖 for later."
+                                          : "Kept in 🔖. Tap to open; Check again there later.")
+        case (_, _, "needs_recipe"): ("No recipe yet: \(job.title ?? source)",
+                                      "The post points to a blog or bio link. Save it for later?")
+        default: ("Not a recipe: \(job.title ?? source)",
+                  "No ingredient list in that post. If the recipe is coming, save it for later.")
         }
         return HStack(alignment: .top, spacing: 12) {
             Group {
@@ -335,6 +354,20 @@ struct CookbookView: View {
                     .font(.footnote)
                     .foregroundStyle(Color.muted)
                     .lineLimit(3)
+                if job.status == "done", let id = job.recipeId, job.recipeStatus != "ready", !kept {
+                    Button {
+                        Task { try? await store.setStatus("needs_recipe", for: id) }
+                    } label: {
+                        Label("Save for later", systemImage: "bookmark")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.terracotta, in: .capsule)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 6)
+                }
             }
             Spacer(minLength: 0)
             if !job.isActive {
@@ -358,13 +391,13 @@ struct CookbookView: View {
             errorBox("Couldn't reach the recipe server (\(error)). Start it on the PC with `uvicorn api.app:app --host 0.0.0.0 --port 8000`.") {
                 Task { await store.load() }
             }
-        } else if store.recipes == nil || (!picks.isEmpty && matches == nil && pantryError == nil) {
+        } else if store.recipes == nil || (filter != .saved && !picks.isEmpty && matches == nil && pantryError == nil) {
             VStack(spacing: 12) {
                 ForEach(0..<4, id: \.self) { _ in
                     RoundedRectangle(cornerRadius: 24).fill(Color.sandSoft).frame(height: 122)
                 }
             }
-        } else if !picks.isEmpty, let pantryError, matches == nil {
+        } else if filter != .saved, !picks.isEmpty, let pantryError, matches == nil {
             errorBox(store.offlineSince != nil
                      ? "Searching by ingredient needs the PC, which is out of reach right now."
                      : "Couldn't search by ingredient (\(pantryError)).") { Task { await searchPantry() } }
@@ -386,6 +419,11 @@ struct CookbookView: View {
     }
 
     private var emptyMessage: String {
+        if filter == .saved {
+            return query.isEmpty
+                ? "Nothing saved for later. When a shared post has no recipe yet, tap Save for later on its card."
+                : "No saved posts match that search."
+        }
         if !query.isEmpty { return "No recipes match that search." }
         if !picks.isEmpty { return "No recipes use those yet. Try another ingredient." }
         return filter == .favorites ? "Tap the heart on a recipe to keep it here." : "Nothing here yet."

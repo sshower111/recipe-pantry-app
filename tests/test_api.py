@@ -52,8 +52,8 @@ def test_detail_has_step_ingredients_and_embed(client):
 
 
 def test_marks_persist_and_survive_reingest(client, tmp_path):
-    assert client.patch("/api/recipes/1", json={"favorite": True}).json() == {"favorite": True, "tried": False}
-    assert client.patch("/api/recipes/1", json={"tried": True}).json() == {"favorite": True, "tried": True}
+    assert client.patch("/api/recipes/1", json={"favorite": True}).json() == {"favorite": True, "tried": False, "status": "ready"}
+    assert client.patch("/api/recipes/1", json={"tried": True}).json() == {"favorite": True, "tried": True, "status": "ready"}
     conn = connect(tmp_path / "recipes.db")
     save_recipe(conn, source_url="https://www.instagram.com/p/ABC123/", title="Shrimp v2",
                 ingredients=[{"name": "shrimp"}])
@@ -118,8 +118,8 @@ def test_ingest_job_runs_in_background(tmp_path):
 
     seen = []
 
-    def fake_ingest(url):
-        seen.append(url)
+    def fake_ingest(url, refresh):
+        seen.append((url, refresh))
         return SimpleNamespace(recipe_id=7, status="added", title="Garlic Noodles", recipe=None,
                                recipe_status="ready", status_note=None)
 
@@ -132,7 +132,7 @@ def test_ingest_job_runs_in_background(tmp_path):
         if done["status"] == "done":
             break
         time.sleep(0.02)
-    assert seen == ["https://www.instagram.com/reel/ABC/?igsh=x"]  # link pulled out of the text
+    assert seen == [("https://www.instagram.com/reel/ABC/?igsh=x", False)]  # link pulled out of the text
     assert (done["recipe_id"], done["title"], done["result"], done["recipe_status"]) == (7, "Garlic Noodles", "added", "ready")
     assert [j["id"] for j in client.get("/api/ingest").json()] == [done["id"]]
     assert client.get("/api/ingest/nope").status_code == 404
@@ -144,7 +144,7 @@ def test_ingest_dedupes_running_jobs_and_reports_failures(tmp_path):
 
     release = threading.Event()
 
-    def slow_failing_ingest(url):
+    def slow_failing_ingest(url, refresh):
         release.wait(2)
         raise RuntimeError("yt-dlp: private video")
 
@@ -164,3 +164,37 @@ def test_ingest_dedupes_running_jobs_and_reports_failures(tmp_path):
 
 def test_ingest_off_without_pipeline(client):
     assert client.post("/api/ingest", json={"url": "https://youtu.be/abc"}).status_code == 503
+
+
+def test_ingest_refresh_reaches_the_pipeline(tmp_path):
+    import time
+    from types import SimpleNamespace
+
+    seen = []
+
+    def fake_ingest(url, refresh):
+        seen.append(refresh)
+        return SimpleNamespace(recipe_id=3, status="updated", title="Later", recipe=None,
+                               recipe_status="needs_recipe", status_note=None)
+
+    client = _ingest_client(tmp_path, fake_ingest)
+    job = client.post("/api/ingest", json={"url": "https://youtu.be/abc", "refresh": True}).json()
+    for _ in range(100):
+        if client.get(f"/api/ingest/{job['id']}").json()["status"] == "done":
+            break
+        time.sleep(0.02)
+    assert seen == [True] and job["refresh"] is True
+
+
+def test_patch_status_keeps_or_hides_posts_without_a_list(client):
+    # Recipe 2 ("Link in bio") has no ingredients; recipe 1 has a list.
+    saved = client.patch("/api/recipes/2", json={"status": "needs_recipe"})
+    assert saved.status_code == 200 and saved.json()["status"] == "needs_recipe"
+    assert [r["id"] for r in client.get("/api/recipes?status=todo").json()] == [2]
+    assert client.patch("/api/recipes/2", json={"status": "not_recipe"}).json()["status"] == "not_recipe"
+    assert client.get("/api/recipes?status=todo").json() == []
+    assert client.patch("/api/recipes/1", json={"status": "needs_recipe"}).status_code == 409
+    assert client.patch("/api/recipes/1", json={"status": "ready"}).status_code == 422
+    assert client.patch("/api/recipes/99", json={"status": "not_recipe"}).status_code == 404
+    assert client.patch("/api/recipes/1", json={"favorite": True}).json() == {"favorite": True, "tried": False,
+                                                                              "status": "ready"}

@@ -34,8 +34,9 @@ struct APIClient {
         return APIClient(baseURL: url)
     }
 
-    func recipes() async throws -> [RecipeSummary] {
-        try await get("api/recipes")
+    /// Ready recipes by default; `status: "todo"` gives posts kept without a recipe yet.
+    func recipes(status: String? = nil) async throws -> [RecipeSummary] {
+        try await get("api/recipes", query: status.map { [URLQueryItem(name: "status", value: $0)] } ?? [])
     }
 
     func recipe(id: Int) async throws -> Recipe {
@@ -47,11 +48,26 @@ struct APIClient {
         var body: [String: Bool] = [:]
         body["favorite"] = favorite
         body["tried"] = tried
-        var request = URLRequest(url: baseURL.appending(path: "api/recipes/\(recipeId)"))
-        request.httpMethod = "PATCH"
+        return try await send(jsonRequest("api/recipes/\(recipeId)", method: "PATCH", body: body))
+    }
+
+    /// Relabels a post without an ingredient list: `needs_recipe` (keep) or `not_recipe` (hide).
+    func setStatus(recipeId: Int, status: String) async throws -> Marks {
+        try await send(jsonRequest("api/recipes/\(recipeId)", method: "PATCH", body: ["status": status]))
+    }
+
+    /// Queues a post on the PC; `refresh` re-reads one already stored ("Check again").
+    func ingest(_ url: String, refresh: Bool = false) async throws -> IngestJob {
+        struct Body: Encodable { let url: String; let refresh: Bool }
+        return try await send(jsonRequest("api/ingest", method: "POST", body: Body(url: url, refresh: refresh)))
+    }
+
+    private func jsonRequest(_ path: String, method: String, body: some Encodable) throws -> URLRequest {
+        var request = URLRequest(url: baseURL.appending(path: path))
+        request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(body)
-        return try await send(request)
+        return request
     }
 
     func ingredients() async throws -> [PantryIngredient] {

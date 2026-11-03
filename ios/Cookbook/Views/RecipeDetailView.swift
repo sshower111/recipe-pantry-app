@@ -11,6 +11,9 @@ struct RecipeDetailView: View {
     @State private var showFullCaption = false
     /// Cooking progress; the Live Activity's ‹ › buttons can move it while the app is away.
     @State private var session: CookingSession?
+    /// "Check again" sent and not yet confirmed by the PC (no recipe yet posts).
+    @State private var checkRequested = false
+    @State private var checkError: String?
 
     private static let platformNames = ["instagram": "Instagram", "youtube": "YouTube", "tiktok": "TikTok"]
 
@@ -108,11 +111,17 @@ struct RecipeDetailView: View {
                     header(recipe)
                         .padding(.horizontal, 16)
                         .padding(.top, 28)
-                    ingredients(recipe)
-                        .padding(.top, 40)
-                    steps(recipe)
-                        .padding(.horizontal, 16)
-                        .padding(.top, 48)
+                    if recipe.ingredients.isEmpty {
+                        noRecipeYet(recipe)
+                            .padding(.horizontal, 16)
+                            .padding(.top, 32)
+                    } else {
+                        ingredients(recipe)
+                            .padding(.top, 40)
+                        steps(recipe)
+                            .padding(.horizontal, 16)
+                            .padding(.top, 48)
+                    }
                 }
                 .padding(.bottom, 64)
             }
@@ -182,7 +191,7 @@ struct RecipeDetailView: View {
             .padding(.top, 20)
 
             FlowLayout(spacing: 8) {
-                triedButton(recipe)
+                if !recipe.ingredients.isEmpty { triedButton(recipe) }  // nothing to cook yet
                 watchButton(recipe)
             }
             .padding(.top, 20)
@@ -190,9 +199,76 @@ struct RecipeDetailView: View {
     }
 
     private func pills(_ recipe: Recipe) -> [String] {
-        [recipe.yieldLabel,
-         "\(recipe.ingredients.count) ingredients",
-         recipe.steps.isEmpty ? nil : "\(recipe.steps.count) steps"].compactMap { $0 }
+        if recipe.ingredients.isEmpty { return ["No recipe yet"] }
+        return [recipe.yieldLabel,
+                "\(recipe.ingredients.count) ingredients",
+                recipe.steps.isEmpty ? nil : "\(recipe.steps.count) steps"].compactMap { $0 }
+    }
+
+    /// A post kept without a recipe (🔖 Saved): Check again re-reads it on the PC, for when the
+    /// creator adds the recipe to the caption or links it. Recipes posted only in the comments
+    /// still can't be read (yt-dlp gets few comments signed out; see CLAUDE.md).
+    private func noRecipeYet(_ recipe: Recipe) -> some View {
+        let checking = store.ingestJobs.contains { $0.isActive && $0.recipeId == recipe.id }
+            || checkRequested
+        let kept = recipe.status == "needs_recipe"
+        return VStack(alignment: .leading, spacing: 12) {
+            Label("No recipe yet", systemImage: "bookmark")
+                .font(.serifTitle(26))
+                .foregroundStyle(Color.ink)
+            Text(kept
+                 ? "Kept in 🔖 for later. When the creator adds the recipe to the caption or links it, Check again reads the post again."
+                 : "This post has no ingredient list. If the recipe is coming, save it for later and check again then.")
+                .font(.callout)
+                .foregroundStyle(Color.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            if let note = checkError {
+                Text(note)
+                    .font(.footnote)
+                    .foregroundStyle(Color.heart)
+            }
+            HStack(spacing: 10) {
+                Button {
+                    checkError = nil
+                    checkRequested = true
+                    Task {
+                        do { try await store.checkAgain(recipe) } catch {
+                            checkError = store.offlineSince != nil
+                                ? "Checking again needs the PC, which is out of reach right now."
+                                : "Couldn't ask the PC: \(error.localizedDescription)"
+                        }
+                        checkRequested = false
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        if checking { ProgressView().tint(.white) } else { Image(systemName: "arrow.clockwise") }
+                        Text(checking ? "Checking on your PC…" : "Check again")
+                    }
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .frame(minHeight: 44)
+                    .background(Color.terracotta, in: .capsule)
+                }
+                .buttonStyle(.plain)
+                .disabled(checking)
+
+                Button(kept ? "Remove from 🔖" : "Save for later") {
+                    Task { try? await store.setStatus(kept ? "not_recipe" : "needs_recipe", for: recipe.id) }
+                }
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Color.ink)
+                .padding(.horizontal, 16)
+                .frame(minHeight: 44)
+                .overlay { Capsule().strokeBorder(Color.sand) }
+                .buttonStyle(.plain)
+            }
+            .padding(.top, 4)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.6), in: .rect(cornerRadius: 24))
+        .overlay { RoundedRectangle(cornerRadius: 24).strokeBorder(Color.sand) }
     }
 
     private func triedButton(_ recipe: Recipe) -> some View {

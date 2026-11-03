@@ -56,6 +56,7 @@ nonisolated struct Step: Codable, Hashable {
 nonisolated struct Marks: Codable {
     let favorite: Bool
     let tried: Bool
+    let status: String?          // ready | needs_recipe | not_recipe
 }
 
 nonisolated struct PantryIngredient: Codable, Hashable {
@@ -88,6 +89,7 @@ nonisolated struct IngestJob: Codable, Identifiable, Hashable {
     let result: String?             // added | updated | skipped
     let recipeStatus: String?       // ready | needs_recipe | not_recipe
     let message: String?
+    let refresh: Bool?              // "Check again" on a post already stored
 
     var isActive: Bool { status == "queued" || status == "running" }
 }

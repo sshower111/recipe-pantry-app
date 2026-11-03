@@ -36,6 +36,8 @@ class IngestJob:
     # ready | needs_recipe | not_recipe: whether the post had an ingredient list
     recipe_status: str | None = None
     message: str | None = None
+    # "Check again": re-download a post already stored instead of answering "skipped"
+    refresh: bool = False
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
@@ -44,7 +46,7 @@ class IngestJob:
 class IngestQueue:
     """One worker thread; jobs run in the order they were shared."""
 
-    def __init__(self, ingest: Callable[[str], Any], key: Callable[[str], str] = lambda url: url,
+    def __init__(self, ingest: Callable[[str, bool], Any], key: Callable[[str], str] = lambda url: url,
                  keep: int = 50) -> None:
         self._ingest = ingest
         self._key = key  # canonical URL, so share-link variants count as the same post
@@ -54,14 +56,14 @@ class IngestQueue:
         self._lock = threading.Lock()
         self._worker: threading.Thread | None = None
 
-    def submit(self, url: str) -> IngestJob:
+    def submit(self, url: str, refresh: bool = False) -> IngestJob:
         """Queue a link, or return the job already queued or running for the same post."""
         key = self._key(url)
         with self._lock:
             for job in self._jobs.values():
                 if job.status in ("queued", "running") and self._key(job.url) == key:
                     return job
-            job = IngestJob(id=uuid.uuid4().hex[:12], url=url)
+            job = IngestJob(id=uuid.uuid4().hex[:12], url=url, refresh=refresh)
             self._jobs[job.id] = job
             self._trim()
             if self._worker is None or not self._worker.is_alive():
@@ -77,12 +79,6 @@ class IngestQueue:
         """Newest first."""
         return sorted(self._jobs.values(), key=lambda job: job.created_at, reverse=True)
 
-    def wait(self, timeout: float | None = None) -> None:
-        """Block until every queued job has finished (for tests)."""
-        done = threading.Event()
-        threading.Thread(target=lambda: (self._pending.join(), done.set()), daemon=True).start()
-        done.wait(timeout)
-
     def _trim(self) -> None:
         finished = [j for j in self.recent() if j.status in ("done", "failed")]
         for job in finished[self._keep:]:
@@ -93,7 +89,7 @@ class IngestQueue:
             job = self._pending.get()
             job.status = "running"
             try:
-                result = self._ingest(job.url)
+                result = self._ingest(job.url, job.refresh)
                 job.recipe_id = result.recipe_id
                 job.result = result.status
                 job.title = result.title or (result.recipe.title if result.recipe else None)

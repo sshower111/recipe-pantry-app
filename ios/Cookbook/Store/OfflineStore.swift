@@ -12,18 +12,20 @@ enum OfflineStore {
         return dir
     }()
 
-    private static var listFile: URL { directory.appending(path: "recipes.json") }
+    /// `recipes.json` (the feed) or e.g. `saved.json` (posts kept without a recipe yet).
+    private static func listFile(_ name: String) -> URL { directory.appending(path: "\(name).json") }
 
     private static func recipeFile(_ id: Int) -> URL { directory.appending(path: "recipes/\(id).json") }
 
-    static func loadList() -> (recipes: [RecipeSummary], savedAt: Date)? {
-        guard let recipes = read([RecipeSummary].self, from: listFile) else { return nil }
-        let savedAt = (try? listFile.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+    static func loadList(named name: String = "recipes") -> (recipes: [RecipeSummary], savedAt: Date)? {
+        let file = listFile(name)
+        guard let recipes = read([RecipeSummary].self, from: file) else { return nil }
+        let savedAt = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
         return (recipes, savedAt ?? .now)
     }
 
-    static func saveList(_ recipes: [RecipeSummary]) {
-        write(recipes, to: listFile)
+    static func saveList(_ recipes: [RecipeSummary], named name: String = "recipes") {
+        write(recipes, to: listFile(name))
     }
 
     static func loadRecipes() -> [Int: Recipe] {
