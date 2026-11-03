@@ -94,10 +94,47 @@ enum LiveActivityController {
     /// Also clears an activity left over from a run that was killed.
     static func endAll() async {
         announcePending = false
+        stayAwake(false)
         for activity in Activity<CookingActivityAttributes>.activities {
             endedByApp.insert(activity.id)
             await activity.end(nil, dismissalPolicy: .immediate)
         }
+    }
+
+    // MARK: Closing the app ends the island
+    //
+    // iOS keeps a Live Activity after its app is closed, and a suspended app gets no word when
+    // it's swiped away in the app switcher. So after leaving (with an island showing) the app
+    // stays awake ~25 s; closing it in that window (the usual "leave, then swipe it off")
+    // delivers willTerminate, which ends the island. Later, the island's ✕ does it.
+
+    private static var awakeTask: UIBackgroundTaskIdentifier = .invalid
+
+    /// Called on `.background` (true) and on coming back or ending (false).
+    static func stayAwake(_ awake: Bool) {
+        if awake {
+            guard awakeTask == .invalid, !Activity<CookingActivityAttributes>.activities.isEmpty else { return }
+            awakeTask = UIApplication.shared.beginBackgroundTask(withName: "end island on close") { stayAwake(false) }
+            Task {
+                try? await Task.sleep(for: .seconds(25))
+                stayAwake(false)
+            }
+        } else if awakeTask != .invalid {
+            UIApplication.shared.endBackgroundTask(awakeTask)
+            awakeTask = .invalid
+        }
+    }
+
+    /// willTerminate: end every activity before the process goes (iOS allows a few seconds).
+    static func endOnTermination() {
+        let done = DispatchSemaphore(value: 0)
+        Task.detached {
+            for activity in Activity<CookingActivityAttributes>.activities {
+                await activity.end(nil, dismissalPolicy: .immediate)
+            }
+            done.signal()
+        }
+        _ = done.wait(timeout: .now() + 2)
     }
 }
 

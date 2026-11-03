@@ -197,12 +197,14 @@ def cmd_list(args: argparse.Namespace) -> int:
               "--file <saved page.html>, or paste the ingredients into a .txt file.")
         return 0
 
-    for r in list_recipes(conn, None if args.all else ["ready"]):
+    for r in list_recipes(conn, None if args.all else ["ready"], include_hidden=args.all):
         if r["ingredient_count"]:
             makes = f", makes {r['yield_label']}" if r["yield_label"] else ""
             detail = f"{r['ingredient_count']} ingredients{makes}"
         else:
             detail = STATUS_LABELS.get(r["status"], "no ingredient list")
+        if r["hidden"]:
+            detail += "; hidden (removed in the app)"
         print(f"[{r['id']}] {r['title']}  ({detail})  {r['source_url']}")
     if not args.all:
         counts = count_by_status(conn)

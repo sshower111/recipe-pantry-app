@@ -86,6 +86,9 @@ _ADDED_COLUMNS = [
     ("recipes", "thumbnail_file", "TEXT"),
     ("recipes", "favorite", "INTEGER NOT NULL DEFAULT 0"),
     ("recipes", "tried", "INTEGER NOT NULL DEFAULT 0"),
+    # A user mark like favorite/tried (re-ingesting never resets it): removed from the app's
+    # feed and lists, kept in the database so it can be undone and isn't re-downloaded.
+    ("recipes", "hidden", "INTEGER NOT NULL DEFAULT 0"),
     ("recipe_steps", "short_text", "TEXT"),
 ]
 

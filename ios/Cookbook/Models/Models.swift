@@ -56,6 +56,7 @@ nonisolated struct Step: Codable, Hashable {
 nonisolated struct Marks: Codable {
     let favorite: Bool
     let tried: Bool
+    let hidden: Bool?            // removed with a swipe
     let status: String?          // ready | needs_recipe | not_recipe
 }
 

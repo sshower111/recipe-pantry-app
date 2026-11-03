@@ -17,8 +17,10 @@ struct RecipeCard: View {
     }
 
     var body: some View {
-        NavigationLink(value: recipe.id) { card }
-            .buttonStyle(.plain)
+        card
+            // In the feed's List, a visible NavigationLink would add a chevron; a hidden one
+            // still makes the whole card open the recipe.
+            .background { NavigationLink(value: recipe.id) { EmptyView() }.opacity(0) }
             .overlay(alignment: .topTrailing) { heart }
     }
 

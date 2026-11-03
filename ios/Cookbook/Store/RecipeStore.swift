@@ -101,6 +101,29 @@ final class RecipeStore {
         checkJobsNow = true
     }
 
+    /// Swipe-to-remove: gone from the feed at once, hidden on the PC (kept in its database, so
+    /// it can be undone and the reel isn't downloaded again if shared). Put back if the PC refuses.
+    func hide(_ id: Int) async -> Bool {
+        let before = (recipes, saved)
+        recipes?.removeAll { $0.id == id }
+        saved.removeAll { $0.id == id }
+        do {
+            _ = try await APIClient.current().setHidden(recipeId: id, hidden: true)
+            if let recipes { OfflineStore.saveList(recipes) }
+            OfflineStore.saveList(saved, named: "saved")
+            return true
+        } catch {
+            (recipes, saved) = before
+            return false
+        }
+    }
+
+    /// Undo for `hide`.
+    func unhide(_ id: Int) async {
+        _ = try? await APIClient.current().setHidden(recipeId: id, hidden: false)
+        await load()
+    }
+
     /// Keep a post without a recipe (`needs_recipe`, the 🔖 list) or hide it (`not_recipe`).
     func setStatus(_ status: String, for id: Int) async throws {
         _ = try await APIClient.current().setStatus(recipeId: id, status: status)

@@ -41,6 +41,7 @@ JOIN recipe_ingredients ri ON ri.recipe_id = r.id
 JOIN ingredients i         ON i.id = ri.ingredient_id
 LEFT JOIN pantry p         ON p.name = i.name
 WHERE i.name NOT IN (SELECT name FROM ignored)
+  AND r.hidden = 0
 GROUP BY r.id
 HAVING matched >= :min_matched
    AND (:max_missing IS NULL OR total - matched <= :max_missing)

@@ -39,7 +39,7 @@ and an uploader, but the schema allows null for both. 280 of 921 ingredient line
 |---|---|---|
 | GET | `/api/recipes` | Cookbook list (`?status=ready\|todo\|all`, default `ready`) |
 | GET | `/api/recipes/{id}` | One recipe with ingredients, steps (+ step ingredient indexes), video |
-| PATCH | `/api/recipes/{id}` | Set `{"favorite": bool}`, `{"tried": bool}` and/or `{"status": "needs_recipe" \| "not_recipe"}`; returns all three |
+| PATCH | `/api/recipes/{id}` | Set `{"favorite": bool}`, `{"tried": bool}`, `{"hidden": bool}` and/or `{"status": "needs_recipe" \| "not_recipe"}`; returns all four |
 | GET | `/api/recipes/{id}/thumbnail` | The image (JPEG/PNG/WebP); 404 if none |
 | GET | `/api/ingredients` | Canonical ingredient names used by ready recipes, most used first |
 | GET | `/api/pantry?have=a&have=b` | Recipes using what you have (repeat `have`); `limit`, `include_staples` |
@@ -260,9 +260,15 @@ with the first letter capitalised, captions with `#hashtags` stripped.
 {
   "favorite": true,
   "tried": true,
+  "hidden": false,
   "status": "ready"
 }
 ```
+
+`hidden: true` is the app's swipe-to-remove: the recipe leaves `GET /api/recipes`, pantry
+results and `/api/ingredients` but stays in the database (a user mark, like `favorite`;
+re-ingesting never resets it), so `hidden: false` undoes it. `GET /api/recipes/{id}` still
+answers for a hidden recipe.
 
 `status` relabels a post **without** an ingredient list: `needs_recipe` keeps it in the app's
 Saved list (`GET /api/recipes?status=todo`; the recipe is elsewhere or still coming),

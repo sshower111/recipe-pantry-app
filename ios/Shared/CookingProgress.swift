@@ -110,3 +110,19 @@ struct ChangeStepIntent: LiveActivityIntent {
         return .result()
     }
 }
+
+/// The ✕ in the Live Activity: ends it right away (also when the app was closed long ago,
+/// since a LiveActivityIntent runs in the app's process, launched if needed).
+struct EndCookingIntent: LiveActivityIntent {
+    static let title: LocalizedStringResource = "End cooking session"
+    static let isDiscoverable = false
+
+    init() {}
+
+    func perform() async throws -> some IntentResult {
+        for activity in Activity<CookingActivityAttributes>.activities {
+            await activity.end(nil, dismissalPolicy: .immediate)
+        }
+        return .result()
+    }
+}

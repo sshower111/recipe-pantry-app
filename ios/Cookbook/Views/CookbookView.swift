@@ -18,6 +18,9 @@ struct CookbookView: View {
     /// Pantry results for the picks, by recipe id, in rank order.
     @State private var matches: [PantryMatch]?
     @State private var pantryError: String?
+    /// The recipe just removed with a swipe (shows the Undo bar).
+    @State private var removed: RecipeSummary?
+    @State private var removeError: String?
 
     /// The server's default RECIPE_PANTRY_STAPLES: never scored, so not worth suggesting.
     private static let staples: Set<String> = ["salt", "black pepper", "water", "oil"]
@@ -84,7 +87,8 @@ struct CookbookView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            ScrollView {
+            // A List (not a ScrollView) for its swipe actions; rows are styled to look the same.
+            List {
                 VStack(alignment: .leading, spacing: 0) {
                     header
                     searchField.padding(.top, 32)
@@ -93,15 +97,17 @@ struct CookbookView: View {
                         pickedChips.padding(.top, 14)
                     }
                     filterChips.padding(.top, 14)
-                    if !store.ingestJobs.isEmpty {
-                        sharedPosts.padding(.top, 20)
-                    }
-                    content.padding(.top, 24)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 24)
-                .padding(.bottom, 64)
+                // Inside one row, buttons must not take over the whole row's tap.
+                .buttonStyle(.borderless)
+                .feedRow(top: 24, bottom: 8)
+                sharedPosts
+                content
+                Color.clear.frame(height: 48).feedRow()
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .environment(\.defaultMinListRowHeight, 0)
             .scrollDismissesKeyboard(.immediately)
             .background(Color.cream)
             .refreshable {
@@ -110,6 +116,7 @@ struct CookbookView: View {
             }
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: Int.self) { RecipeDetailView(recipeId: $0) }
+            .overlay(alignment: .bottom) { removedBar }
         }
         .task { if store.recipes == nil { await store.load() } }
         .task { await loadIngredients() }
@@ -300,17 +307,17 @@ struct CookbookView: View {
 
     /// Posts shared from the share sheet: being added on the PC, or just finished.
     private var sharedPosts: some View {
-        VStack(spacing: 10) {
-            ForEach(store.ingestJobs) { job in
+        ForEach(store.ingestJobs) { job in
+            jobRow(job)
+                .buttonStyle(.borderless)
                 // Open the recipe once there's one to open: ready, or kept in 🔖 Saved.
-                if job.status == "done", let id = job.recipeId,
-                   job.recipeStatus == "ready" || store.saved.contains(where: { $0.id == id }) {
-                    NavigationLink(value: id) { jobRow(job) }
-                        .buttonStyle(.plain)
-                } else {
-                    jobRow(job)
+                .background {
+                    if job.status == "done", let id = job.recipeId,
+                       job.recipeStatus == "ready" || store.saved.contains(where: { $0.id == id }) {
+                        NavigationLink(value: id) { EmptyView() }.opacity(0)
+                    }
                 }
-            }
+                .feedRow(top: 5, bottom: 5)
         }
     }
 
@@ -391,30 +398,90 @@ struct CookbookView: View {
             errorBox("Couldn't reach the recipe server (\(error)). Start it on the PC with `uvicorn api.app:app --host 0.0.0.0 --port 8000`.") {
                 Task { await store.load() }
             }
+            .feedRow(top: 16)
         } else if store.recipes == nil || (filter != .saved && !picks.isEmpty && matches == nil && pantryError == nil) {
-            VStack(spacing: 12) {
-                ForEach(0..<4, id: \.self) { _ in
-                    RoundedRectangle(cornerRadius: 24).fill(Color.sandSoft).frame(height: 122)
-                }
+            ForEach(0..<4, id: \.self) { _ in
+                RoundedRectangle(cornerRadius: 24).fill(Color.sandSoft).frame(height: 122).feedRow()
             }
         } else if filter != .saved, !picks.isEmpty, let pantryError, matches == nil {
             errorBox(store.offlineSince != nil
                      ? "Searching by ingredient needs the PC, which is out of reach right now."
                      : "Couldn't search by ingredient (\(pantryError)).") { Task { await searchPantry() } }
+                .feedRow(top: 16)
         } else if shown.isEmpty {
             Text(emptyMessage)
                 .foregroundStyle(Color.muted)
                 .frame(maxWidth: .infinity)
                 .padding(.top, 16)
+                .feedRow()
         } else {
-            LazyVStack(spacing: 12) {
-                ForEach(shown, id: \.recipe.id) { item in
-                    RecipeCard(recipe: item.recipe, thumbnailURL: store.thumbnailURL(item.recipe.thumbnailUrl),
-                               match: item.match) {
-                        Task { await store.toggle(.favorite, for: item.recipe.id) }
+            ForEach(shown, id: \.recipe.id) { item in
+                RecipeCard(recipe: item.recipe, thumbnailURL: store.thumbnailURL(item.recipe.thumbnailUrl),
+                           match: item.match) {
+                    Task { await store.toggle(.favorite, for: item.recipe.id) }
+                }
+                .feedRow()
+                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                    Button(role: .destructive) { remove(item.recipe) } label: {
+                        Label("Remove", systemImage: "trash")
                     }
                 }
             }
+        }
+    }
+
+    /// Swipe-to-remove hides the recipe on the PC (it stays in the database); Undo brings it back.
+    private func remove(_ recipe: RecipeSummary) {
+        Task {
+            if await store.hide(recipe.id) {
+                removed = recipe
+                removeError = nil
+            } else {
+                removeError = "Removing needs the PC, which is out of reach right now."
+            }
+        }
+    }
+
+    /// "Removed “Title” · Undo" for a few seconds after a swipe.
+    @ViewBuilder
+    private var removedBar: some View {
+        if let recipe = removed {
+            HStack(spacing: 12) {
+                Text("Removed “\(recipe.title)”")
+                    .lineLimit(1)
+                    .foregroundStyle(.white)
+                Spacer(minLength: 8)
+                Button("Undo") {
+                    removed = nil
+                    Task { await store.unhide(recipe.id) }
+                }
+                .fontWeight(.semibold)
+                .foregroundStyle(Color.terracottaSoft)
+            }
+            .font(.subheadline)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .background(Color.ink, in: .capsule)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .task(id: recipe.id) {
+                try? await Task.sleep(for: .seconds(5))
+                withAnimation { removed = nil }
+            }
+        } else if let removeError {
+            Text(removeError)
+                .font(.subheadline)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 14)
+                .background(Color.ink, in: .capsule)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+                .task {
+                    try? await Task.sleep(for: .seconds(4))
+                    self.removeError = nil
+                }
         }
     }
 
@@ -476,4 +543,14 @@ struct CookbookView: View {
 
 #Preview {
     CookbookView().environment(RecipeStore())
+}
+
+private extension View {
+    /// A List row that looks like the old ScrollView feed: no separator or row background,
+    /// 16 pt side margins.
+    func feedRow(top: CGFloat = 6, bottom: CGFloat = 6) -> some View {
+        listRowInsets(EdgeInsets(top: top, leading: 16, bottom: bottom, trailing: 16))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+    }
 }

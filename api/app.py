@@ -28,6 +28,8 @@ _LINK = re.compile(r"https?://\S+")
 class Marks(BaseModel):
     favorite: bool | None = None
     tried: bool | None = None
+    # Removed with a swipe in the app; false brings it back (Undo).
+    hidden: bool | None = None
     # Only for posts without an ingredient list: keep it (needs_recipe) or hide it (not_recipe).
     status: Literal["needs_recipe", "not_recipe"] | None = None
 
@@ -125,7 +127,7 @@ def create_app(
                     raise HTTPException(404, "Recipe not found")
             except ValueError as exc:
                 raise HTTPException(409, str(exc)) from exc
-        result = set_marks(conn, recipe_id, favorite=marks.favorite, tried=marks.tried)
+        result = set_marks(conn, recipe_id, favorite=marks.favorite, tried=marks.tried, hidden=marks.hidden)
         if result is None:
             raise HTTPException(404, "Recipe not found")
         status = conn.execute("SELECT status FROM recipes WHERE id = ?", (recipe_id,)).fetchone()[0]
@@ -142,7 +144,7 @@ def create_app(
                 SELECT i.name, COUNT(DISTINCT ri.recipe_id) AS recipes
                 FROM ingredients i
                 JOIN recipe_ingredients ri ON ri.ingredient_id = i.id
-                JOIN recipes r ON r.id = ri.recipe_id AND r.status = 'ready'
+                JOIN recipes r ON r.id = ri.recipe_id AND r.status = 'ready' AND r.hidden = 0
                 GROUP BY i.id
                 ORDER BY recipes DESC, i.name
                 """

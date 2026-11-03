@@ -127,17 +127,19 @@ def set_thumbnail(conn: sqlite3.Connection, recipe_id: int, file_name: str | Non
 
 
 def set_marks(
-    conn: sqlite3.Connection, recipe_id: int, *, favorite: bool | None = None, tried: bool | None = None
+    conn: sqlite3.Connection, recipe_id: int, *, favorite: bool | None = None, tried: bool | None = None,
+    hidden: bool | None = None,
 ) -> dict[str, bool] | None:
-    """Set the user's favorite/tried marks (None leaves a mark as it is). Returns both marks,
-    or None if there is no such recipe."""
+    """Set the user's favorite/tried/hidden marks (None leaves a mark as it is). Returns all
+    three, or None if there is no such recipe."""
     with conn:
         conn.execute(
-            "UPDATE recipes SET favorite = COALESCE(?, favorite), tried = COALESCE(?, tried) WHERE id = ?",
-            (favorite, tried, recipe_id),
+            "UPDATE recipes SET favorite = COALESCE(?, favorite), tried = COALESCE(?, tried),"
+            " hidden = COALESCE(?, hidden) WHERE id = ?",
+            (favorite, tried, hidden, recipe_id),
         )
-    row = conn.execute("SELECT favorite, tried FROM recipes WHERE id = ?", (recipe_id,)).fetchone()
-    return None if row is None else {"favorite": bool(row[0]), "tried": bool(row[1])}
+    row = conn.execute("SELECT favorite, tried, hidden FROM recipes WHERE id = ?", (recipe_id,)).fetchone()
+    return None if row is None else {"favorite": bool(row[0]), "tried": bool(row[1]), "hidden": bool(row[2])}
 
 
 def set_status(conn: sqlite3.Connection, recipe_id: int, status: str) -> str | None:
@@ -257,24 +259,28 @@ def set_short_steps(conn: sqlite3.Connection, recipe_id: int, short_steps: Itera
         )
 
 
-def list_recipes(conn: sqlite3.Connection, statuses: Iterable[str] | None = None) -> list[dict[str, Any]]:
-    """Recipes newest first, optionally only those with one of ``statuses``."""
+def list_recipes(
+    conn: sqlite3.Connection, statuses: Iterable[str] | None = None, *, include_hidden: bool = False
+) -> list[dict[str, Any]]:
+    """Recipes newest first, optionally only those with one of ``statuses``. Recipes the user
+    removed (``hidden``) are left out unless ``include_hidden``."""
     wanted = None if statuses is None else json.dumps(list(statuses))
     return [
         dict(r)
         for r in conn.execute(
             """
             SELECT r.id, r.title, r.source_url, r.yield_label, r.uploader, r.description,
-                   r.status, r.status_note, r.video_id, r.thumbnail_file, r.favorite, r.tried,
+                   r.status, r.status_note, r.video_id, r.thumbnail_file, r.favorite, r.tried, r.hidden,
                    COUNT(DISTINCT ri.ingredient_id) AS ingredient_count,
                    (SELECT COUNT(*) FROM recipe_steps rs WHERE rs.recipe_id = r.id) AS step_count
             FROM recipes r
             LEFT JOIN recipe_ingredients ri ON ri.recipe_id = r.id
-            WHERE :wanted IS NULL OR r.status IN (SELECT value FROM json_each(:wanted))
+            WHERE (:wanted IS NULL OR r.status IN (SELECT value FROM json_each(:wanted)))
+              AND (:include_hidden OR r.hidden = 0)
             GROUP BY r.id
             ORDER BY r.created_at DESC, r.id DESC
             """,
-            {"wanted": wanted},
+            {"wanted": wanted, "include_hidden": include_hidden},
         )
     ]
 

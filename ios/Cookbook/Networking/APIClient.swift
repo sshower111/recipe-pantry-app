@@ -51,6 +51,11 @@ struct APIClient {
         return try await send(jsonRequest("api/recipes/\(recipeId)", method: "PATCH", body: body))
     }
 
+    /// Swipe-to-remove (`true`) and its Undo (`false`); the recipe stays in the PC's database.
+    func setHidden(recipeId: Int, hidden: Bool) async throws -> Marks {
+        try await send(jsonRequest("api/recipes/\(recipeId)", method: "PATCH", body: ["hidden": hidden]))
+    }
+
     /// Relabels a post without an ingredient list: `needs_recipe` (keep) or `not_recipe` (hide).
     func setStatus(recipeId: Int, status: String) async throws -> Marks {
         try await send(jsonRequest("api/recipes/\(recipeId)", method: "PATCH", body: ["status": status]))

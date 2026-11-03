@@ -21,6 +21,10 @@ struct CookbookApp: App {
         WindowGroup {
             CookbookView()
                 .environment(store)
+                // Swiped away in the app switcher while still awake: take the island with it.
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.willTerminateNotification)) { _ in
+                    LiveActivityController.endOnTermination()
+                }
         }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
@@ -32,6 +36,7 @@ struct CookbookApp: App {
             case .background:
                 Task {
                     await LiveActivityController.startOnLeave()
+                    LiveActivityController.stayAwake(true)  // so closing the app soon can end it
                     await LiveActivityController.announce()
                 }
             @unknown default: break

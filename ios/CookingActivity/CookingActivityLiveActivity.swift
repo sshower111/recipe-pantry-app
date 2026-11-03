@@ -186,16 +186,23 @@ private struct StepButtons: View {
             StepButton(systemImage: "chevron.right", label: "Next step", height: height,
                        intent: ChangeStepIntent(recipeId: id, offset: 1),
                        enabled: state.currentStepIndex < state.totalSteps - 1)
+            // Ends the island now; iOS keeps it after the app is closed otherwise.
+            StepButton(systemImage: "xmark", label: "End cooking session", height: height,
+                       intent: EndCookingIntent(), enabled: true, style: .quiet)
+                .frame(width: height * 1.4)
         }
     }
 }
 
-private struct StepButton: View {
+private struct StepButton<Action: AppIntent>: View {
+    enum Style { case primary, quiet }
+
     let systemImage: String
     let label: String
     let height: CGFloat
-    let intent: ChangeStepIntent
+    let intent: Action
     let enabled: Bool
+    var style = Style.primary
 
     var body: some View {
         Button(intent: intent) {
@@ -203,7 +210,7 @@ private struct StepButton: View {
                 .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(enabled ? .white : .white.opacity(0.3))
                 .frame(maxWidth: .infinity, minHeight: height)
-                .background(enabled ? terracotta : .white.opacity(0.12), in: Capsule())
+                .background(enabled && style == .primary ? terracotta : .white.opacity(0.12), in: Capsule())
         }
         .buttonStyle(.plain)
         .disabled(!enabled)

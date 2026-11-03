@@ -52,8 +52,8 @@ def test_detail_has_step_ingredients_and_embed(client):
 
 
 def test_marks_persist_and_survive_reingest(client, tmp_path):
-    assert client.patch("/api/recipes/1", json={"favorite": True}).json() == {"favorite": True, "tried": False, "status": "ready"}
-    assert client.patch("/api/recipes/1", json={"tried": True}).json() == {"favorite": True, "tried": True, "status": "ready"}
+    assert client.patch("/api/recipes/1", json={"favorite": True}).json() == {"favorite": True, "tried": False, "hidden": False, "status": "ready"}
+    assert client.patch("/api/recipes/1", json={"tried": True}).json() == {"favorite": True, "tried": True, "hidden": False, "status": "ready"}
     conn = connect(tmp_path / "recipes.db")
     save_recipe(conn, source_url="https://www.instagram.com/p/ABC123/", title="Shrimp v2",
                 ingredients=[{"name": "shrimp"}])
@@ -197,4 +197,20 @@ def test_patch_status_keeps_or_hides_posts_without_a_list(client):
     assert client.patch("/api/recipes/1", json={"status": "ready"}).status_code == 422
     assert client.patch("/api/recipes/99", json={"status": "not_recipe"}).status_code == 404
     assert client.patch("/api/recipes/1", json={"favorite": True}).json() == {"favorite": True, "tried": False,
-                                                                              "status": "ready"}
+                                                                              "hidden": False, "status": "ready"}
+
+
+def test_hidden_recipes_leave_lists_and_pantry_but_survive_reingest(client, tmp_path):
+    hidden = client.patch("/api/recipes/1", json={"hidden": True}).json()
+    assert hidden["hidden"] is True
+    assert client.get("/api/recipes").json() == []
+    assert client.get("/api/pantry?have=shrimp").json() == []
+    assert client.get("/api/ingredients").json() == []
+    assert client.get("/api/recipes/1").status_code == 200  # still there, so Undo can find it
+    conn = connect(tmp_path / "recipes.db")
+    save_recipe(conn, source_url="https://www.instagram.com/p/ABC123/", title="Shrimp v2",
+                ingredients=[{"name": "shrimp"}])
+    conn.close()
+    assert client.get("/api/recipes").json() == []  # re-ingesting doesn't un-hide it
+    assert client.patch("/api/recipes/1", json={"hidden": False}).json()["hidden"] is False
+    assert [r["id"] for r in client.get("/api/recipes").json()] == [1]
