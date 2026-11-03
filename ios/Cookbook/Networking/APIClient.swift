@@ -1,0 +1,90 @@
+import Foundation
+
+enum APIError: LocalizedError {
+    case badServerURL(String)
+    case http(status: Int, detail: String?)
+
+    var errorDescription: String? {
+        switch self {
+        case .badServerURL(let text):
+            "“\(text)” isn't a valid server address."
+        case .http(let status, let detail):
+            detail.map { "\($0) (HTTP \(status))" } ?? "The server answered HTTP \(status)."
+        }
+    }
+}
+
+/// Talks to the FastAPI server on the Mac (`uvicorn api.app:app`). See docs/ios/api.md.
+struct APIClient {
+    /// UserDefaults / @AppStorage key for the server address set in Settings.
+    static let serverURLKey = "serverURL"
+    /// The Simulator shares the Mac's network; a real iPhone needs `http://<mac>.local:8000`.
+    static let defaultServerURL = "http://localhost:8000"
+
+    let baseURL: URL
+    var session: URLSession = .shared
+
+    /// A client for the address currently saved in Settings.
+    static func current() throws -> APIClient {
+        let text = UserDefaults.standard.string(forKey: serverURLKey) ?? defaultServerURL
+        guard let url = URL(string: text.trimmingCharacters(in: .whitespaces)), url.host() != nil else {
+            throw APIError.badServerURL(text)
+        }
+        return APIClient(baseURL: url)
+    }
+
+    func recipes() async throws -> [RecipeSummary] {
+        try await get("api/recipes")
+    }
+
+    func recipe(id: Int) async throws -> Recipe {
+        try await get("api/recipes/\(id)")
+    }
+
+    /// Sets either mark (or both); the server returns the stored values.
+    func setMarks(recipeId: Int, favorite: Bool? = nil, tried: Bool? = nil) async throws -> Marks {
+        var body: [String: Bool] = [:]
+        body["favorite"] = favorite
+        body["tried"] = tried
+        var request = URLRequest(url: baseURL.appending(path: "api/recipes/\(recipeId)"))
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(body)
+        return try await send(request)
+    }
+
+    func ingredients() async throws -> [PantryIngredient] {
+        try await get("api/ingredients")
+    }
+
+    func pantry(have: [String], limit: Int? = nil) async throws -> [PantryMatch] {
+        var query = have.map { URLQueryItem(name: "have", value: $0) }
+        if let limit { query.append(URLQueryItem(name: "limit", value: String(limit))) }
+        return try await get("api/pantry", query: query)
+    }
+
+    /// `thumbnail_url` is a path on the server, e.g. `/api/recipes/1/thumbnail`.
+    func absoluteURL(_ path: String?) -> URL? {
+        guard let path else { return nil }
+        return URL(string: path, relativeTo: baseURL)?.absoluteURL
+    }
+
+    private func get<T: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws -> T {
+        var url = baseURL.appending(path: path)
+        if !query.isEmpty { url.append(queryItems: query) }
+        return try await send(URLRequest(url: url))
+    }
+
+    private func send<T: Decodable>(_ request: URLRequest) async throws -> T {
+        let (data, response) = try await session.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else {
+            // FastAPI errors look like {"detail": "Recipe not found"}.
+            let detail = (try? JSONDecoder().decode([String: String].self, from: data))?["detail"]
+            throw APIError.http(status: status, detail: detail)
+        }
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        return try decoder.decode(T.self, from: data)
+    }
+}

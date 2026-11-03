@@ -9,72 +9,53 @@ import ActivityKit
 import WidgetKit
 import SwiftUI
 
-struct CookingActivityAttributes: ActivityAttributes {
-    public struct ContentState: Codable, Hashable {
-        // Dynamic stateful properties about your activity go here!
-        var emoji: String
-    }
-
-    // Fixed non-changing properties about your activity go here!
-    var name: String
-}
-
+// Placeholder layouts on the shared CookingActivityAttributes (ios/Shared/);
+// the real Lock Screen and Dynamic Island designs come in build step 6.
 struct CookingActivityLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: CookingActivityAttributes.self) { context in
-            // Lock screen/banner UI goes here
-            VStack {
-                Text("Hello \(context.state.emoji)")
+            VStack(alignment: .leading) {
+                Text("Step \(context.state.currentStepIndex + 1)/\(context.state.totalSteps)")
+                Text(context.state.instructionText)
             }
-            .activityBackgroundTint(Color.cyan)
-            .activitySystemActionForegroundColor(Color.black)
+            .padding()
+            .activityBackgroundTint(Color.black)
+            .activitySystemActionForegroundColor(Color.white)
 
         } dynamicIsland: { context in
             DynamicIsland {
-                // Expanded UI goes here.  Compose the expanded UI through
-                // various regions, like leading/trailing/center/bottom
-                DynamicIslandExpandedRegion(.leading) {
-                    Text("Leading")
-                }
-                DynamicIslandExpandedRegion(.trailing) {
-                    Text("Trailing")
-                }
                 DynamicIslandExpandedRegion(.bottom) {
-                    Text("Bottom \(context.state.emoji)")
-                    // more content
+                    Text(context.state.instructionText)
                 }
             } compactLeading: {
-                Text("L")
+                Text("Step \(context.state.currentStepIndex + 1)/\(context.state.totalSteps)")
             } compactTrailing: {
-                Text("T \(context.state.emoji)")
+                Image(systemName: "frying.pan")
             } minimal: {
-                Text(context.state.emoji)
+                Image(systemName: "frying.pan")
             }
-            .widgetURL(URL(string: "http://www.apple.com"))
-            .keylineTint(Color.red)
+            .widgetURL(URL(string: "cookbook://recipe/\(context.attributes.recipeId)"))
         }
     }
 }
 
 extension CookingActivityAttributes {
     fileprivate static var preview: CookingActivityAttributes {
-        CookingActivityAttributes(name: "World")
+        CookingActivityAttributes(recipeId: 1, recipeTitle: "Garlic Butter Shrimp")
     }
 }
 
 extension CookingActivityAttributes.ContentState {
-    fileprivate static var smiley: CookingActivityAttributes.ContentState {
-        CookingActivityAttributes.ContentState(emoji: "😀")
-     }
-     
-     fileprivate static var starEyes: CookingActivityAttributes.ContentState {
-         CookingActivityAttributes.ContentState(emoji: "🤩")
-     }
+    fileprivate static var firstStep: CookingActivityAttributes.ContentState {
+        CookingActivityAttributes.ContentState(
+            currentStepIndex: 0, totalSteps: 3,
+            instructionText: "Melt the butter in a pan over medium heat.",
+            stepIngredients: ["3 tbsp Unsalted butter"], timerEndsAt: nil)
+    }
 }
 
 #Preview("Notification", as: .content, using: CookingActivityAttributes.preview) {
    CookingActivityLiveActivity()
 } contentStates: {
-    CookingActivityAttributes.ContentState.smiley
-    CookingActivityAttributes.ContentState.starEyes
+    CookingActivityAttributes.ContentState.firstStep
 }
