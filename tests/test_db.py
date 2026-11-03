@@ -204,3 +204,16 @@ def test_backfill_marks_old_rows_with_ingredients_ready(tmp_path):
     assert backfill_status(conn, lambda d: "not_recipe") == 1
     assert get_recipe(conn, 1)["status"] == "ready"
     assert backfill_status(conn, lambda d: "not_recipe") == 0
+
+
+def test_connection_usable_from_another_thread(tmp_path):
+    # The API opens a request's connection on one worker thread and uses it on another.
+    import threading
+
+    conn = connect(tmp_path / "r.db", check_same_thread=False)
+    result = []
+    worker = threading.Thread(target=lambda: result.append(conn.execute("SELECT 1").fetchone()[0]))
+    worker.start()
+    worker.join()
+    assert result == [1]
+    conn.close()

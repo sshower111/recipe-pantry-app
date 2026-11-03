@@ -20,6 +20,9 @@ Everything runs on your own machines: no cloud APIs.
 <p align="center"><sub>"Watch on Instagram" opens the reel and the current step follows in the
 Dynamic Island. Captured in the iOS Simulator (Instagram's web page stands in for the app).</sub></p>
 
+**Tech:** Python · yt-dlp · faster-whisper · EasyOCR · Ollama (local LLM, JSON-schema output) ·
+SQLite · FastAPI · SwiftUI · ActivityKit / App Intents · Next.js · Tailwind · pytest (230 tests)
+
 ## What it does
 
 - **Share a reel, get a recipe.** "Cookbook" in the iPhone share sheet sends the link to the
@@ -74,7 +77,7 @@ flowchart LR
 
 From my own collection of 117 saved posts: 90 recipes with 922 ingredient lines (343 distinct
 ingredients after normalization) and 739 steps, 99% of which have a model-written island
-version (73 characters on average, 43 shortened). 229 tests run without network, Ollama or
+version (73 characters on average, 43 shortened). 230 tests run without network, Ollama or
 Whisper.
 
 ## iPhone app
@@ -280,6 +283,13 @@ for m in find_recipes_by_pantry(conn, ["chicken", "garlic", "rice"], limit=5):
 
 ## Web app
 
+<p align="center">
+  <img src="docs/screenshots/cooking.gif" width="220" alt="Web cooking mode: finishing steps, then the step bar">
+  <img src="docs/screenshots/cookbook.png" width="160" alt="Web cookbook list with video thumbnails">
+  <img src="docs/screenshots/recipe.png" width="160" alt="Web recipe page with hero image">
+  <img src="docs/screenshots/cooking.png" width="160" alt="Web cooking mode showing only that step's ingredients">
+</p>
+
 The browser version: a mobile-first cookbook in `web/` (Next.js, Tailwind, Framer Motion) reads the database
 through a small FastAPI server. Run both (Node 20+):
 
@@ -296,6 +306,14 @@ cd web && npm install && npm run dev   # http://localhost:3000
   while you cook.
 - **Cooking mode**: one step at a time with only the ingredients that step mentions;
   "Done, next step" fades finished steps back. Progress is kept per device.
+- **Step timers**: when a step names a time ("bake for 28-32 minutes"), a
+  "Start 28 min timer" button counts it down.
+- **Dynamic Island step bar**: scroll away from the step card and a black pill at the top
+  keeps showing "Step 02/06" and the timer; tap it to open the step, its ingredients and
+  Previous / Next. It stays in sync with the main cooking mode.
+- **Live Activity**: the web app's "Dynamic Island" switch was written for a Capacitor
+  wrapper (`web/native/ios/`) that was never built; the native [iPhone app](#iphone-app) does
+  this for real. In a browser the switch only saves your preference.
 
 New ingests save their thumbnail automatically. Favorite/tried marks live in the
 `recipes` table and survive re-ingesting. Step ingredients are matched from the step's
