@@ -254,6 +254,9 @@ downloaded as video, up to `RECIPE_VISUAL_MAX_FRAMES` keyframes are sent to
 `RECIPE_VISUAL_MODEL` (default: the parsing model), and its steps are stored with the second
 each one starts (`recipe_steps.start_seconds`). The model needs image input; with a text-only
 model the call fails and the fallback is skipped with a warning. `reparse` keeps these steps.
+For recipes saved before this existed, `python main.py video-steps --dry-run` lists the
+silent ones without steps, and `python main.py video-steps` reads their videos (`--todo`
+includes the needs-recipe list).
 
 **GPU transcription:** set `RECIPE_WHISPER_DEVICE=cuda` and `RECIPE_WHISPER_COMPUTE_TYPE=float16`.
 This needs the CUDA 12 cuBLAS and cuDNN 9 libraries; see the faster-whisper README.

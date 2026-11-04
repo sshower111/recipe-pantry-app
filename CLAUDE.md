@@ -71,6 +71,7 @@ python main.py show <id> [--json]
 python main.py import-page <id> [--url <recipe page>] [--file saved.html|list.txt]   # creator's blog
 python main.py reparse <id> [<id> ...] | --missing-steps   # re-run the model on saved text
 python main.py shorten-steps [<id> ...] [--refresh]   # island step versions, no reparse
+python main.py video-steps [<id> ...] [--todo] [--dry-run]   # steps from frames of silent recipes
 python main.py renormalize [--dry-run]   # after normalizer/ALIASES edits
 python main.py thumbnails [--refresh]    # save video thumbnails to data/thumbnails/
 uvicorn api.app:app --host 0.0.0.0 --port 8000   # API for the iPhone app (on the PC)
@@ -126,7 +127,10 @@ uvicorn api.app:app --host 0.0.0.0 --port 8000   # API for the iPhone app (on th
   fill missing steps (times in `recipe_steps.start_seconds`) and, when there's no ingredient
   list, names without amounts (source label `visual`). One video download is shared with OCR
   (`ingest.VideoFile`). Failures are logged, never fail an ingest. `reparse` keeps steps that
-  have start times when the new parse has none. Not yet run against a real vision model; the
+  have start times when the new parse has none. `video-steps` applies it to stored recipes
+  (`ingest.steps_from_video`: video download only, stored ingredients kept): by default every
+  ready recipe with no steps whose saved transcript is silent; `--todo` adds needs_recipe
+  posts (they turn ready if the frames give ingredient names). Not yet run against a real vision model; the
   API doesn't expose `start_seconds` yet.
 - **Recipe pages** (`RECIPE_RECIPE_PAGES`, default on). When a parse looks incomplete and the
   caption links to a non-social page (`urls.recipe_link`), `webrecipe.fetch_recipe_page` reads its

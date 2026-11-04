@@ -519,3 +519,69 @@ def shorten_recipe_steps(conn: sqlite3.Connection, recipe_id: int, cfg: Settings
     )
     set_short_steps(conn, recipe_id, shorts)
     return shorts
+
+
+def stored_is_silent(stored: dict, cfg: Settings = default_settings) -> bool:
+    """Whether a stored recipe's saved transcript counts as a silent / music-only video
+    (no download needed to tell)."""
+    return is_silent(stored["transcript"] or "", stored["transcript_source"] or "none", cfg.visual_min_words)
+
+
+def steps_from_video(conn: sqlite3.Connection, recipe_id: int, cfg: Settings = default_settings) -> IngestResult:
+    """Add steps read from a stored recipe's video frames (the visual fallback, for recipes
+    saved before it existed). Downloads the video only: no Whisper, no text parse; stored
+    ingredients are kept, and only filled from the frames when there are none. Raises
+    ValueError when the frames give nothing new."""
+    stored = get_recipe(conn, recipe_id)
+    if stored is None:
+        raise ValueError(f"No recipe with id {recipe_id}")
+    video = VideoFile(stored["source_url"], cfg)
+    try:
+        visual = read_video_steps(
+            video, cfg, title=stored["title"], description=stored["description"] or "",
+            on_screen=stored["on_screen_text"] or "", known_ingredients=[i["raw_name"] for i in stored["ingredients"]],
+        )
+    finally:
+        video.close()
+    if visual is None or not visual.steps:
+        raise ValueError(f"No steps could be read from recipe {recipe_id}'s video")
+
+    current = ParsedRecipe(
+        title=stored["title"], sources=[], yield_label=stored["yield_label"],
+        ingredients=[Ingredient(name=i["raw_name"], amount=i["amount"], unit=i["unit"]) for i in stored["ingredients"]],
+        steps=stored["steps"],
+    )
+    recipe, step_times = merge_visual(current, visual)
+    if recipe.steps == current.steps and recipe.ingredients == current.ingredients:
+        raise ValueError(f"Recipe {recipe_id} already has steps; left as it was")
+    from_frames = bool(recipe.ingredients) and not current.ingredients
+    sources = ["visual"] if from_frames else stored["ingredient_sources"]
+    status = "ready" if recipe.ingredients else stored["status"]
+    note = None if recipe.ingredients else stored["status_note"]
+    save_recipe(
+        conn,
+        source_url=stored["source_url"],
+        title=stored["title"],
+        ingredients=[i.model_dump() for i in recipe.ingredients],
+        steps=recipe.steps,
+        short_steps=short_steps(recipe.steps, [i.name for i in recipe.ingredients], cfg),
+        step_times=step_times,
+        yield_label=stored["yield_label"],
+        ingredient_sources=sources,
+        video_id=stored["video_id"],
+        uploader=stored["uploader"],
+        description=stored["description"],
+        transcript=stored["transcript"],
+        transcript_source=stored["transcript_source"],
+        on_screen_text=stored["on_screen_text"],
+        recipe_page_url=stored["recipe_page_url"],
+        recipe_page_text=stored["recipe_page_text"],
+        raw_llm_json=stored["raw_llm_json"],
+        status=status,
+        status_note=note,
+    )
+    return IngestResult(
+        recipe_id=recipe_id, source_url=stored["source_url"], status="updated", recipe=recipe,
+        transcript_source=stored["transcript_source"], ingredient_sources=sources,
+        description=stored["description"], title=stored["title"], recipe_status=status, status_note=note,
+    )

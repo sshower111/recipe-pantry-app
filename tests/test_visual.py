@@ -268,3 +268,70 @@ def test_reparse_keeps_steps_read_from_frames(monkeypatch):
     ingest.reparse_recipe(conn, rid, settings)
     after = get_recipe(conn, rid)
     assert (after["steps"], after["step_times"], after["short_steps"]) == (["Fry the rice."], [3.0], ["Fry the rice"])
+
+
+# --- stored recipes: video-steps --------------------------------------------------------------
+
+def stored_db(path=":memory:"):
+    conn = connect(path)
+    silent = save_recipe(conn, source_url="https://www.instagram.com/p/S1/", title="Silent Rice",
+                         ingredients=[{"name": "rice", "amount": 2, "unit": "cup"}], ingredient_sources=["description"],
+                         description="2 cups rice", transcript="", transcript_source="none", status="ready")
+    spoken = save_recipe(conn, source_url="https://www.instagram.com/p/S2/", title="Talky Toast",
+                         ingredients=[{"name": "bread"}], transcript="toast the bread then butter it well",
+                         transcript_source="whisper", status="ready")
+    todo = save_recipe(conn, source_url="https://www.instagram.com/p/S3/", title="Post by chef", ingredients=[],
+                       description="recipe on my blog", transcript="[Music]", transcript_source="whisper",
+                       status="needs_recipe", status_note="HTTP 403")
+    return conn, silent, spoken, todo
+
+
+def test_steps_from_video_keeps_ingredients(monkeypatch, tmp_path):
+    conn, silent, _, _ = stored_db()
+    seen = []
+    monkeypatch.setattr(ingest, "read_video_steps", lambda video, cfg, **kw: seen.append((video.url, kw)) or VISUAL)
+    ingest.steps_from_video(conn, silent, cfg(tmp_path))
+
+    assert seen[0][0] == "https://www.instagram.com/p/S1/"
+    assert seen[0][1]["known_ingredients"] == ["rice"]
+    after = get_recipe(conn, silent)
+    assert after["steps"] == ["Scramble the eggs.", "Fry the rice with the eggs."]
+    assert after["step_times"] == [0.0, 5.0]
+    assert [(i["name"], i["amount"], i["unit"]) for i in after["ingredients"]] == [("rice", 2, "cup")]
+    assert after["ingredient_sources"] == ["description"]
+
+
+def test_steps_from_video_fills_a_todo_post(monkeypatch, tmp_path):
+    conn, _, _, todo = stored_db()
+    monkeypatch.setattr(ingest, "read_video_steps", lambda video, cfg, **kw: VISUAL)
+    ingest.steps_from_video(conn, todo, cfg(tmp_path))
+    after = get_recipe(conn, todo)
+    assert (after["status"], after["status_note"], after["ingredient_sources"]) == ("ready", None, ["visual"])
+
+
+def test_steps_from_video_nothing_found_leaves_recipe(monkeypatch, tmp_path):
+    conn, silent, _, _ = stored_db()
+    monkeypatch.setattr(ingest, "read_video_steps", lambda video, cfg, **kw: None)
+    with pytest.raises(ValueError, match="No steps"):
+        ingest.steps_from_video(conn, silent, cfg(tmp_path))
+    assert get_recipe(conn, silent)["steps"] == []
+
+
+def test_video_steps_command_picks_silent_recipes(monkeypatch, tmp_path, capsys):
+    import main
+
+    path = tmp_path / "r.db"
+    conn, silent, spoken, todo = stored_db(path)
+    conn.close()
+    monkeypatch.setattr(main, "settings", dataclasses.replace(main.settings, db_path=path, downloads_dir=tmp_path))
+    read = []
+    monkeypatch.setattr(ingest, "read_video_steps", lambda video, cfg, **kw: read.append(video.url) or VISUAL)
+
+    assert main.main(["video-steps", "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert "2 recipes without steps: 1 silent or music-only, 1 with speech" in out
+    assert "Silent Rice" in out and "Talky Toast" not in out
+    assert read == []
+
+    assert main.main(["video-steps", "--todo"]) == 0
+    assert sorted(read) == ["https://www.instagram.com/p/S1/", "https://www.instagram.com/p/S3/"]
