@@ -22,6 +22,7 @@ def save_recipe(
     title: str,
     ingredients: Iterable[Mapping[str, Any]],
     steps: Iterable[str] = (),
+    short_steps: Iterable[str | None] = (),
     yield_label: str | None = None,
     ingredient_sources: Iterable[str] = (),
     video_id: str | None = None,
@@ -45,6 +46,8 @@ def save_recipe(
     A recipe with ingredient lines is always ``ready``. Without any, ``status`` says why
     (``needs_recipe`` or ``not_recipe``; left NULL if not given, for ``backfill_status``)
     and ``status_note`` can give details.
+
+    ``short_steps`` are the island versions of ``steps``, by position (missing ones are NULL).
     """
     sources = ",".join(dict.fromkeys(s for s in ingredient_sources if s)) or None
 
@@ -78,9 +81,11 @@ def save_recipe(
 
         conn.execute("DELETE FROM recipe_ingredients WHERE recipe_id = ?", (recipe_id,))
         conn.execute("DELETE FROM recipe_steps WHERE recipe_id = ?", (recipe_id,))
+        shorts = list(short_steps)
+        pairs = [((t or "").strip(), shorts[n] if n < len(shorts) else None) for n, t in enumerate(steps)]
         conn.executemany(
-            "INSERT INTO recipe_steps (recipe_id, position, text) VALUES (?, ?, ?)",
-            [(recipe_id, n, text) for n, text in enumerate(t.strip() for t in steps if t and t.strip())],
+            "INSERT INTO recipe_steps (recipe_id, position, text, short_text) VALUES (?, ?, ?, ?)",
+            [(recipe_id, n, text, short) for n, (text, short) in enumerate(p for p in pairs if p[0])],
         )
 
         position = 0
@@ -122,17 +127,39 @@ def set_thumbnail(conn: sqlite3.Connection, recipe_id: int, file_name: str | Non
 
 
 def set_marks(
-    conn: sqlite3.Connection, recipe_id: int, *, favorite: bool | None = None, tried: bool | None = None
+    conn: sqlite3.Connection, recipe_id: int, *, favorite: bool | None = None, tried: bool | None = None,
+    hidden: bool | None = None,
 ) -> dict[str, bool] | None:
-    """Set the user's favorite/tried marks (None leaves a mark as it is). Returns both marks,
-    or None if there is no such recipe."""
+    """Set the user's favorite/tried/hidden marks (None leaves a mark as it is). Returns all
+    three, or None if there is no such recipe."""
     with conn:
         conn.execute(
-            "UPDATE recipes SET favorite = COALESCE(?, favorite), tried = COALESCE(?, tried) WHERE id = ?",
-            (favorite, tried, recipe_id),
+            "UPDATE recipes SET favorite = COALESCE(?, favorite), tried = COALESCE(?, tried),"
+            " hidden = COALESCE(?, hidden) WHERE id = ?",
+            (favorite, tried, hidden, recipe_id),
         )
-    row = conn.execute("SELECT favorite, tried FROM recipes WHERE id = ?", (recipe_id,)).fetchone()
-    return None if row is None else {"favorite": bool(row[0]), "tried": bool(row[1])}
+    row = conn.execute("SELECT favorite, tried, hidden FROM recipes WHERE id = ?", (recipe_id,)).fetchone()
+    return None if row is None else {"favorite": bool(row[0]), "tried": bool(row[1]), "hidden": bool(row[2])}
+
+
+def set_status(conn: sqlite3.Connection, recipe_id: int, status: str) -> str | None:
+    """Relabel a post without an ingredient list: ``needs_recipe`` (keep it, the recipe is
+    elsewhere or coming) or ``not_recipe``. Returns the status, None if there is no such
+    recipe. Raises ValueError for a recipe that has ingredients (those are always ``ready``)."""
+    if status not in ("needs_recipe", "not_recipe"):
+        raise ValueError(f"status must be needs_recipe or not_recipe, not {status!r}")
+    row = conn.execute(
+        "SELECT r.id, COUNT(ri.id) FROM recipes r LEFT JOIN recipe_ingredients ri ON ri.recipe_id = r.id"
+        " WHERE r.id = ? GROUP BY r.id",
+        (recipe_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    if row[1]:
+        raise ValueError("this recipe has an ingredient list, so it stays ready")
+    with conn:
+        conn.execute("UPDATE recipes SET status = ? WHERE id = ?", (status, recipe_id))
+    return status
 
 
 def backfill_status(conn: sqlite3.Connection, classify_empty: Callable[[str | None], str]) -> int:
@@ -215,32 +242,45 @@ def get_recipe(conn: sqlite3.Connection, recipe_id: int) -> dict[str, Any] | Non
             (recipe_id,),
         )
     ]
-    recipe["steps"] = [
-        r[0] for r in conn.execute(
-            "SELECT text FROM recipe_steps WHERE recipe_id = ? ORDER BY position", (recipe_id,)
-        )
-    ]
+    rows = conn.execute(
+        "SELECT text, short_text FROM recipe_steps WHERE recipe_id = ? ORDER BY position", (recipe_id,)
+    ).fetchall()
+    recipe["steps"] = [r[0] for r in rows]
+    recipe["short_steps"] = [r[1] for r in rows]  # None where not shortened yet
     return recipe
 
 
-def list_recipes(conn: sqlite3.Connection, statuses: Iterable[str] | None = None) -> list[dict[str, Any]]:
-    """Recipes newest first, optionally only those with one of ``statuses``."""
+def set_short_steps(conn: sqlite3.Connection, recipe_id: int, short_steps: Iterable[str | None]) -> None:
+    """Store the island versions of a recipe's steps, by position; nothing else changes."""
+    with conn:
+        conn.executemany(
+            "UPDATE recipe_steps SET short_text = ? WHERE recipe_id = ? AND position = ?",
+            [(short, recipe_id, n) for n, short in enumerate(short_steps)],
+        )
+
+
+def list_recipes(
+    conn: sqlite3.Connection, statuses: Iterable[str] | None = None, *, include_hidden: bool = False
+) -> list[dict[str, Any]]:
+    """Recipes newest first, optionally only those with one of ``statuses``. Recipes the user
+    removed (``hidden``) are left out unless ``include_hidden``."""
     wanted = None if statuses is None else json.dumps(list(statuses))
     return [
         dict(r)
         for r in conn.execute(
             """
             SELECT r.id, r.title, r.source_url, r.yield_label, r.uploader, r.description,
-                   r.status, r.status_note, r.video_id, r.thumbnail_file, r.favorite, r.tried,
+                   r.status, r.status_note, r.video_id, r.thumbnail_file, r.favorite, r.tried, r.hidden,
                    COUNT(DISTINCT ri.ingredient_id) AS ingredient_count,
                    (SELECT COUNT(*) FROM recipe_steps rs WHERE rs.recipe_id = r.id) AS step_count
             FROM recipes r
             LEFT JOIN recipe_ingredients ri ON ri.recipe_id = r.id
-            WHERE :wanted IS NULL OR r.status IN (SELECT value FROM json_each(:wanted))
+            WHERE (:wanted IS NULL OR r.status IN (SELECT value FROM json_each(:wanted)))
+              AND (:include_hidden OR r.hidden = 0)
             GROUP BY r.id
             ORDER BY r.created_at DESC, r.id DESC
             """,
-            {"wanted": wanted},
+            {"wanted": wanted, "include_hidden": include_hidden},
         )
     ]
 

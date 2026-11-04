@@ -3,15 +3,15 @@
   "configurations": [
     {
       "name": "api",
-      "runtimeExecutable": ".venv/Scripts/python.exe",
-      "runtimeArgs": ["-m", "uvicorn", "api.app:app", "--port", "8000"],
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": [
+        "-m",
+        "uvicorn",
+        "api.app:app",
+        "--port",
+        "8000"
+      ],
       "port": 8000
-    },
-    {
-      "name": "web",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "web", "run", "dev"],
-      "port": 3000
     }
   ]
 }

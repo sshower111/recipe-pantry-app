@@ -7,6 +7,7 @@
     python main.py list [--todo | --all]
     python main.py show <recipe_id>
     python main.py import-page <recipe_id> [--url <page>] [--file saved.html|ingredients.txt]
+    python main.py shorten-steps [<recipe_id> ...] [--refresh]
 """
 
 from __future__ import annotations
@@ -196,12 +197,14 @@ def cmd_list(args: argparse.Namespace) -> int:
               "--file <saved page.html>, or paste the ingredients into a .txt file.")
         return 0
 
-    for r in list_recipes(conn, None if args.all else ["ready"]):
+    for r in list_recipes(conn, None if args.all else ["ready"], include_hidden=args.all):
         if r["ingredient_count"]:
             makes = f", makes {r['yield_label']}" if r["yield_label"] else ""
             detail = f"{r['ingredient_count']} ingredients{makes}"
         else:
             detail = STATUS_LABELS.get(r["status"], "no ingredient list")
+        if r["hidden"]:
+            detail += "; hidden (removed in the app)"
         print(f"[{r['id']}] {r['title']}  ({detail})  {r['source_url']}")
     if not args.all:
         counts = count_by_status(conn)
@@ -263,6 +266,40 @@ def cmd_reparse(args: argparse.Namespace) -> int:
         print(f"{n}/{len(ids)} UPDATED {describe_result(result)}")
     if len(ids) > 1:
         print(f"{len(ids) - failures} reparsed, {failures} failed")
+    return 1 if failures else 0
+
+
+def cmd_shorten_steps(args: argparse.Namespace) -> int:
+    """Write the short island version of each step for stored recipes (no downloads, no
+    reparse): the given ids, else every ready recipe with a step not shortened yet."""
+    from pipeline.ingest import shorten_recipe_steps
+    from pipeline.parser import OllamaError
+
+    conn = open_db()
+    ids = list(dict.fromkeys(args.recipe_ids))
+    if not ids:
+        ids = [
+            r["id"] for r in list_recipes(conn, ["ready"])
+            if r["step_count"] and (args.refresh or None in get_recipe(conn, r["id"])["short_steps"])
+        ]
+    if not ids:
+        print("Every recipe's steps are already shortened.")
+        return 0
+    print(f"Shortening steps of {len(ids)} recipe{'s' * (len(ids) != 1)}")
+    failures = 0
+    for n, recipe_id in enumerate(ids, 1):
+        try:
+            shorts = shorten_recipe_steps(conn, recipe_id)
+        except (ValueError, OllamaError) as exc:
+            print(f"FAILED [{recipe_id}] {exc}", file=sys.stderr)
+            failures += 1
+            continue
+        recipe = get_recipe(conn, recipe_id)
+        print(f"{n}/{len(ids)} [{recipe_id}] {recipe['title']}")
+        for step, short in zip(recipe["steps"], shorts):
+            print(f"    {short or '(kept: ' + step + ')'}")
+    if len(ids) > 1:
+        print(f"{len(ids) - failures} shortened, {failures} failed")
     return 1 if failures else 0
 
 
@@ -400,6 +437,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--missing-steps", action="store_true",
                    help="every ready recipe that has no steps yet (e.g. saved before steps existed)")
     p.set_defaults(func=cmd_reparse)
+
+    p = sub.add_parser("shorten-steps",
+                       help="write short step versions for the iPhone's Dynamic Island (no reparse)")
+    p.add_argument("recipe_ids", type=int, nargs="*",
+                   help="recipes to shorten (default: every ready recipe with steps not shortened yet)")
+    p.add_argument("--refresh", action="store_true", help="shorten every recipe's steps again")
+    p.set_defaults(func=cmd_shorten_steps)
 
     p = sub.add_parser("renormalize",
                        help="recompute stored ingredient names after normalizer/alias changes")

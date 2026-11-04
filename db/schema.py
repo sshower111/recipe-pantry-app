@@ -63,6 +63,9 @@ CREATE TABLE IF NOT EXISTS recipe_steps (
     recipe_id INTEGER NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
     position  INTEGER NOT NULL,
     text      TEXT NOT NULL,
+    -- A model-written version of about 40-60 characters for the iOS Dynamic Island and
+    -- Lock Screen (NULL until `main.py shorten-steps` or a parse fills it).
+    short_text TEXT,
     PRIMARY KEY (recipe_id, position)
 );
 
@@ -83,6 +86,10 @@ _ADDED_COLUMNS = [
     ("recipes", "thumbnail_file", "TEXT"),
     ("recipes", "favorite", "INTEGER NOT NULL DEFAULT 0"),
     ("recipes", "tried", "INTEGER NOT NULL DEFAULT 0"),
+    # A user mark like favorite/tried (re-ingesting never resets it): removed from the app's
+    # feed and lists, kept in the database so it can be undone and isn't re-downloaded.
+    ("recipes", "hidden", "INTEGER NOT NULL DEFAULT 0"),
+    ("recipe_steps", "short_text", "TEXT"),
 ]
 
 
@@ -98,9 +105,8 @@ def init_db(conn: sqlite3.Connection) -> None:
 def connect(path: str | Path = ":memory:", *, check_same_thread: bool = True) -> sqlite3.Connection:
     """Open a connection with foreign keys on and the schema applied.
 
-    Pass ``check_same_thread=False`` when a connection is opened on one thread and used on
-    another, one at a time (FastAPI runs a request's dependency and endpoint on different
-    worker threads)."""
+    ``check_same_thread=False`` is for the API, whose request connections may be opened
+    and closed on different worker threads (still used by one request at a time)."""
     on_disk = str(path) != ":memory:"
     if on_disk:
         Path(path).parent.mkdir(parents=True, exist_ok=True)

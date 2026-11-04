@@ -9,6 +9,8 @@ from db.repository import (
     renormalize_ingredients,
     save_recipe,
     set_marks,
+    set_status,
+    set_short_steps,
     set_status_note,
     set_thumbnail,
 )
@@ -31,6 +33,8 @@ __all__ = [
     "match_step_ingredients",
     "save_recipe",
     "set_marks",
+    "set_status",
+    "set_short_steps",
     "set_status_note",
     "set_thumbnail",
 ]
