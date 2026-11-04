@@ -23,13 +23,34 @@ struct IngredientRow: View {
 
     private func tile(_ ingredient: Ingredient, isActive: Bool) -> some View {
         let quantity = ingredient.quantity
+        let tint = isActive ? Color.terracotta : Color.ink.opacity(0.8)
         return VStack(alignment: .leading, spacing: 8) {
-            Text(quantity.isEmpty ? String(ingredient.name.prefix(1)).uppercased() : quantity)
-                .font(.serifTitle(quantity.count > 6 ? 20 : 30))
-                .foregroundStyle(isActive ? Color.terracotta : Color.ink.opacity(0.8))
-                .minimumScaleFactor(0.6)
-                .lineLimit(2)
-                .multilineTextAlignment(.center)
+            Group {
+                if let icon = IngredientIcon.asset(for: ingredient.name) {
+                    // A black-and-white icon (no ingredient photos exist), the amount under it.
+                    VStack(spacing: 8) {
+                        Image(icon)
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: quantity.isEmpty ? 48 : 40, height: quantity.isEmpty ? 48 : 40)
+                        if !quantity.isEmpty {
+                            Text(quantity)
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                        }
+                    }
+                } else {
+                    // No icon fits ("aromatic"): the amount alone, as before.
+                    Text(quantity.isEmpty ? String(ingredient.name.prefix(1)).uppercased() : quantity)
+                        .font(.serifTitle(quantity.count > 6 ? 20 : 30))
+                        .minimumScaleFactor(0.6)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                }
+            }
+            .foregroundStyle(tint)
                 .padding(8)
                 .frame(width: 112, height: 112)
                 .background(isActive ? Color.terracottaSoft : Color.sandSoft, in: .rect(cornerRadius: 16))

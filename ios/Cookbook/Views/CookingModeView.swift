@@ -1,12 +1,17 @@
 import SwiftUI
 
-/// Step-by-step focus mode: one step at a time with just the ingredients it uses, plus an
-/// overview list where finished steps fade back (web: components/CookingMode.tsx).
+/// Step-by-step focus mode: a progress bar, the step card (StepCard) and an overview list where
+/// finished steps fade back.
 struct CookingModeView: View {
     let session: CookingSession
     let ingredients: [Ingredient]
     let tried: Bool
     let onMarkTried: () -> Void
+    /// Where the step card is relative to the screen (the recipe screen pops a copy up once
+    /// it has been scrolled past going down).
+    var onCardPosition: (CardPosition) -> Void = { _ in }
+
+    nonisolated enum CardPosition: Equatable, Sendable { case onScreen, above, below }
 
     /// The focus card's scroll id, for jumping here from the Live Activity.
     static let focusID = "focus"
@@ -14,12 +19,19 @@ struct CookingModeView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             progressBar
-            focusCard
+            StepCard(session: session, ingredients: ingredients, tried: tried, onMarkTried: onMarkTried)
                 .id(Self.focusID)
                 .padding(.top, 20)
-            if !session.allDone {
-                controls.padding(.top, 16)
-            }
+                // The scroll view's visible area in the card's own coordinates: below the card's
+                // bottom means it was scrolled past going down ("above" the screen).
+                .onGeometryChange(for: CardPosition.self) { proxy in
+                    guard let visible = proxy.bounds(of: .scrollView) else { return .onScreen }
+                    if visible.minY > proxy.size.height { return .above }
+                    if visible.maxY < 0 { return .below }
+                    return .onScreen
+                } action: { position in
+                    onCardPosition(position)
+                }
             overview.padding(.top, 32)
             if !session.progress.done.isEmpty {
                 Button("Start over") { withAnimation(.easeOut(duration: 0.25)) { session.startOver() } }
@@ -57,165 +69,6 @@ struct CookingModeView: View {
         .animation(.easeOut(duration: 0.35), value: session.progress)
     }
 
-    private var focusCard: some View {
-        ZStack {
-            if session.allDone {
-                finished
-                    .transition(.opacity.combined(with: .offset(y: 12)))
-            } else {
-                stepContent(session.active)
-                    .id(session.active)
-                    .transition(.push(from: session.direction > 0 ? .trailing : .leading))
-            }
-        }
-        .frame(maxWidth: .infinity, minHeight: 256, alignment: .topLeading)
-        .padding(24)
-        .background(Color.white.opacity(0.7), in: .rect(cornerRadius: 24))
-        .overlay { RoundedRectangle(cornerRadius: 24).strokeBorder(Color.sand) }
-        .clipShape(.rect(cornerRadius: 24))
-        .animation(.spring(response: 0.32, dampingFraction: 0.9), value: session.active)
-        .animation(.easeOut(duration: 0.3), value: session.allDone)
-    }
-
-    private func stepContent(_ index: Int) -> some View {
-        let step = session.steps[index]
-        let isDone = session.progress.done.contains(index)
-        return VStack(alignment: .leading, spacing: 20) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(String(format: "%02d", index + 1))
-                    .font(.serifTitle(56))
-                    .foregroundStyle(Color.terracotta)
-                Spacer()
-                Text("Step \(index + 1) of \(session.steps.count)")
-                    .font(.subheadline)
-                    .foregroundStyle(Color.muted)
-            }
-            Text(step.text)
-                .font(.title3)
-                .foregroundStyle(Color.ink)
-                .lineSpacing(4)
-                .opacity(isDone ? 0.4 : 1)
-                .fixedSize(horizontal: false, vertical: true)
-            if !step.ingredients.isEmpty {
-                FlowLayout(spacing: 8) {
-                    ForEach(step.ingredients.filter(ingredients.indices.contains), id: \.self) { i in
-                        ingredientPill(ingredients[i])
-                    }
-                }
-            }
-            timerButton
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func ingredientPill(_ ingredient: Ingredient) -> some View {
-        let quantity = ingredient.quantity
-        return (Text(quantity.isEmpty ? "" : quantity + " ").fontWeight(.medium) + Text(ingredient.label))
-            .font(.subheadline)
-            .foregroundStyle(Color.ink)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 6)
-            .background(Color.sandSoft, in: .capsule)
-    }
-
-    @ViewBuilder
-    private var timerButton: some View {
-        if let timer = session.timerForActiveStep {
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                let remaining = timer.endsAt.timeIntervalSince(context.date)
-                Button {
-                    session.cancelTimer()
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "timer")
-                        Text(remaining <= 0 ? "Time's up" : StepTimer.clock(remaining))
-                            .monospacedDigit()
-                        Image(systemName: "xmark").foregroundStyle(Color.muted)
-                    }
-                    .font(.subheadline)
-                    .foregroundStyle(remaining <= 0 ? Color.terracotta : Color.ink)
-                    .padding(.horizontal, 16)
-                    .frame(minHeight: 44)
-                    .overlay { Capsule().strokeBorder(remaining <= 0 ? Color.terracotta : Color.sand) }
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Cancel timer")
-                .sensoryFeedback(.warning, trigger: remaining <= 0) { _, up in up }
-            }
-        } else if let seconds = session.activeDuration {
-            Button {
-                session.startTimer()
-            } label: {
-                Label("Start \(StepTimer.label(seconds)) timer", systemImage: "timer")
-                    .font(.subheadline)
-                    .foregroundStyle(Color.ink)
-                    .padding(.horizontal, 16)
-                    .frame(minHeight: 44)
-                    .overlay { Capsule().strokeBorder(Color.sand) }
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    private var finished: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "party.popper")
-                .font(.system(size: 30, weight: .light))
-                .foregroundStyle(Color.terracotta)
-            Text("All done. Enjoy!")
-                .font(.serifTitle(30))
-                .foregroundStyle(Color.ink)
-                .padding(.top, 4)
-            Text("You finished all \(session.steps.count) steps.")
-                .font(.subheadline)
-                .foregroundStyle(Color.muted)
-            if !tried {
-                Button(action: onMarkTried) {
-                    Text("Mark as cooked")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 10)
-                        .background(Color.terracotta, in: .capsule)
-                }
-                .buttonStyle(.plain)
-                .padding(.top, 12)
-            }
-        }
-        .frame(maxWidth: .infinity, minHeight: 208)
-    }
-
-    private var controls: some View {
-        HStack(spacing: 12) {
-            Button {
-                withAnimation { session.select(session.active - 1) }
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(Color.ink)
-                    .frame(width: 48, height: 48)
-                    .background(Color.white.opacity(0.7), in: .circle)
-                    .overlay { Circle().strokeBorder(Color.sand) }
-            }
-            .buttonStyle(.plain)
-            .disabled(session.active == 0)
-            .opacity(session.active == 0 ? 0.3 : 1)
-            .accessibilityLabel("Previous step")
-
-            Button {
-                withAnimation { session.completeStep() }
-            } label: {
-                Label(session.active == session.steps.count - 1 ? "Finish" : "Done, next step", systemImage: "checkmark")
-                    .font(.body.weight(.medium))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, minHeight: 48)
-                    .background(Color.terracotta, in: .capsule)
-            }
-            .buttonStyle(.plain)
-            .sensoryFeedback(.success, trigger: session.allDone) { _, done in done }
-        }
-    }
-
     private var overview: some View {
         VStack(spacing: 0) {
             ForEach(session.steps.indices, id: \.self) { index in
@@ -234,7 +87,6 @@ struct CookingModeView: View {
                                 .font(.system(size: 15))
                                 .foregroundStyle(Color.ink)
                                 .lineSpacing(3)
-                                .lineLimit(isActive ? nil : 2)
                                 .multilineTextAlignment(.leading)
                             Spacer(minLength: 0)
                         }

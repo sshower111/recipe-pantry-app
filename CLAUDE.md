@@ -194,7 +194,25 @@ cd web; npm run dev                      # web app on :3000 (also .claude/launch
     time out after 8 s. Marks, ingredient search and Check again need the PC.
   - Cooking progress (step in focus, done steps, the step timer) lives on the phone
     (`Shared/CookingProgress.swift`, UserDefaults), shared with the Live Activity.
-  - Live Activity (`CookingActivity/`): starts on "Watch on Instagram", or on leaving a recipe
+  - Recipe screen: ▶ opens the post only in its app (`UIApplication.open` with
+    `universalLinksOnly`; no app installed = an alert offering Safari), never a browser on its
+    own: the browser asks people to sign in. Ingredient tiles show black-and-white icons
+    (`Models/IngredientIcon.swift`, keyword rules on the canonical name, specific first):
+    proteins as their animal (cow, pig, chicken, duck, fish), one mixed-vegetables icon for
+    every vegetable, one fruits icon; sources/licenses in `ios/Art/icons` (Health Icons CC0,
+    Tabler MIT, Lucide ISC; Tabler/Lucide strokes thinned to 1.25 to match).
+  - Cooking mode: the step card (`Views/StepCard.swift`) is a paging horizontal scroll view
+    (swipe between steps; a hand-made drag stuttered). The same StepCard, `compact`, pops up
+    at the top while scrolling once the card is above the screen (scrolled down past it), and
+    tucks away ~2 s after scrolling stops; never while above the card. The step list shows
+    every step in full.
+  - Live Activity (`CookingActivity/`): follows Apple's Live Activities HIG in the app's look
+    (SF Pro, cream/terracotta; Lock Screen cream or warm dark by appearance, 14 pt margins;
+    the cook as logo mark; one ‹ | › control plus ✕; compact/minimal fit the 28 pt circle,
+    a progress ring or the timer). The expanded island picks 3 or 2 lines with ViewThatFits:
+    iOS gives it less height on a long press than when an alert opens it, and a greedy
+    (`maxHeight: .infinity`) region squeezed the instruction to one line.
+    It starts on ▶ (watch), or on leaving a recipe
     (`.inactive`; iOS refuses requests once in the background) if Settings' switch is on;
     ends whenever the app is active again, on the island's ✕ (`EndCookingIntent`), and when
     the app is closed in the app switcher: iOS keeps activities after their app quits and

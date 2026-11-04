@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// One recipe: hero, title, caption, pills, actions, ingredients and steps
 /// (web: app/recipes/[id]/page.tsx).
@@ -11,9 +12,18 @@ struct RecipeDetailView: View {
     @State private var showFullCaption = false
     /// Cooking progress; the Live Activity's ‹ › buttons can move it while the app is away.
     @State private var session: CookingSession?
+    /// Where cooking mode's step card is: the pop-up only comes out once it's been scrolled
+    /// past going down (reading the step list), not while above it (photo, ingredients).
+    @State private var cardPosition = CookingModeView.CardPosition.onScreen
+    /// The pop-up copy of the step card: out only while scrolling away from the real one.
+    @State private var showStepBar = false
+    @State private var hideStepBar: Task<Void, Never>?
+    @State private var lastScrollY: CGFloat?
     /// "Check again" sent and not yet confirmed by the PC (no recipe yet posts).
     @State private var checkRequested = false
     @State private var checkError: String?
+    /// ▶ found no app for the post (e.g. Instagram not installed): offer Safari instead.
+    @State private var appMissing: AppMissing?
 
     private static let platformNames = ["instagram": "Instagram", "youtube": "YouTube", "tiktok": "TikTok"]
 
@@ -69,6 +79,12 @@ struct RecipeDetailView: View {
                 }
             }
         }
+        .alert(item: $appMissing) { missing in
+            Alert(title: Text("\(missing.name) isn't installed"),
+                  message: Text("The video opens in the \(missing.name) app so you stay signed in. Install it, or open the post in Safari, which may ask you to sign in."),
+                  primaryButton: .default(Text("Open in Safari")) { openURL(missing.url) },
+                  secondaryButton: .cancel())
+        }
         // The system back arrow takes the tint: soft white over the photo, like the heart.
         .tint(.softWhite)
         // Refresh on every visit (steps may have been re-parsed on the PC); cached copy shows meanwhile.
@@ -79,6 +95,27 @@ struct RecipeDetailView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { session?.reload() }
+        }
+    }
+
+    /// Scrolling below the step card (it's above the screen): pop up its copy until a moment
+    /// after the scrolling stops.
+    private func scrolled() {
+        guard cardPosition == .above, session?.steps.isEmpty == false else { return }
+        setStepBar(true)
+    }
+
+    /// Shows the pop-up card (and restarts its countdown to tuck away) or hides it now.
+    private func setStepBar(_ show: Bool) {
+        hideStepBar?.cancel()
+        if show != showStepBar {
+            withAnimation(.snappy(duration: 0.25)) { showStepBar = show }
+        }
+        guard show else { return }
+        hideStepBar = Task {
+            try? await Task.sleep(for: .seconds(2))  // a full card takes a moment to read
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.3)) { showStepBar = false }
         }
     }
 
@@ -124,6 +161,29 @@ struct RecipeDetailView: View {
                     }
                 }
                 .padding(.bottom, 64)
+                // Any scroll movement (iOS 17 has no scroll-phase signal) pops the line up.
+                .onGeometryChange(for: CGFloat.self) { $0.frame(in: .scrollView).minY } action: { y in
+                    // Only real movement: not the first layout when the screen opens.
+                    if let last = lastScrollY, abs(y - last) > 2 { scrolled() }
+                    lastScrollY = y
+                }
+            }
+            .overlay(alignment: .top) {
+                // The same step card as on the page (same size, look and controls), on an opaque
+                // cream backing so it reads over the content. 6 + 10 pt of padding keeps the card
+                // itself exactly as wide as the page's (16 pt margins).
+                if showStepBar, let session, !session.steps.isEmpty, !session.allDone {
+                    StepCard(session: session, ingredients: recipe.ingredients, tried: recipe.tried,
+                             onMarkTried: { Task { await store.toggle(.tried, for: recipeId) } },
+                             onInteract: { setStepBar(true) }, showsHint: false, compact: true)
+                        .padding(10)
+                        .background(Color.cream, in: .rect(cornerRadius: 32))
+                        .overlay { RoundedRectangle(cornerRadius: 32).strokeBorder(Color.sand) }
+                        .shadow(color: Color.ink.opacity(0.16), radius: 18, y: 6)
+                        .padding(.horizontal, 6)
+                        .padding(.top, 4)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
             }
             // Opened from the Live Activity: jump to the step card, which shows its step.
             .onChange(of: store.stepToReveal, initial: true) { _, id in
@@ -271,6 +331,9 @@ struct RecipeDetailView: View {
         .overlay { RoundedRectangle(cornerRadius: 24).strokeBorder(Color.sand) }
     }
 
+    /// Mark as cooked and ▶ share one height.
+    private static let actionHeight: CGFloat = 40
+
     private func triedButton(_ recipe: Recipe) -> some View {
         Button {
             Task { await store.toggle(.tried, for: recipeId) }
@@ -279,7 +342,7 @@ struct RecipeDetailView: View {
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(recipe.tried ? Color.terracotta : Color.ink)
                 .padding(.horizontal, 16)
-                .padding(.vertical, 10)
+                .frame(height: Self.actionHeight)
                 .background(recipe.tried ? Color.terracottaSoft : Color.white.opacity(0.7), in: .capsule)
                 .overlay { Capsule().strokeBorder(recipe.tried ? Color.clear : Color.sand) }
         }
@@ -287,8 +350,9 @@ struct RecipeDetailView: View {
         .sensoryFeedback(.success, trigger: recipe.tried) { _, tried in tried }
     }
 
-    /// Starts the Live Activity on the current step, then opens the post in its app
-    /// (Instagram etc.) or the browser, so the step follows along in the Dynamic Island.
+    /// ▶: starts the Live Activity on the current step, then opens the post in its app
+    /// (Instagram etc.), so the step follows along in the Dynamic Island. Only the app: a
+    /// browser asks people to sign in, so without the app installed it asks first.
     @ViewBuilder
     private func watchButton(_ recipe: Recipe) -> some View {
         if let url = URL(string: recipe.video.url) {
@@ -296,19 +360,31 @@ struct RecipeDetailView: View {
             Button {
                 Task {
                     await LiveActivityController.start(recipe)
-                    openURL(url)
+                    let opened = await UIApplication.shared.open(url, options: [.universalLinksOnly: true])
+                    if !opened {
+                        await LiveActivityController.endAll()  // still here: no island needed
+                        appMissing = AppMissing(name: platform ?? "the post's app", url: url)
+                    }
                 }
             } label: {
-                Label(platform.map { "Watch on \($0)" } ?? "Open original", systemImage: "play.fill")
+                // Same look and height as Mark as cooked, beside it.
+                Image(systemName: "play.fill")
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(Color.ink)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
+                    .padding(.horizontal, 18)
+                    .frame(height: Self.actionHeight)
                     .background(Color.white.opacity(0.7), in: .capsule)
                     .overlay { Capsule().strokeBorder(Color.sand) }
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(platform.map { "Watch on \($0)" } ?? "Watch the video")
         }
+    }
+
+    struct AppMissing: Identifiable {
+        let name: String
+        let url: URL
+        var id: String { url.absoluteString }
     }
 
     private func ingredients(_ recipe: Recipe) -> some View {
@@ -353,9 +429,12 @@ struct RecipeDetailView: View {
                     .background(Color.white.opacity(0.6), in: .rect(cornerRadius: 24))
                     .overlay { RoundedRectangle(cornerRadius: 24).strokeBorder(Color.sand) }
             } else if let session {
-                CookingModeView(session: session, ingredients: recipe.ingredients, tried: recipe.tried) {
-                    Task { await store.toggle(.tried, for: recipeId) }
-                }
+                CookingModeView(session: session, ingredients: recipe.ingredients, tried: recipe.tried,
+                                onMarkTried: { Task { await store.toggle(.tried, for: recipeId) } },
+                                onCardPosition: { position in
+                                    cardPosition = position
+                                    if position != .above { setStepBar(false) }
+                                })
             }
         }
     }
