@@ -130,8 +130,10 @@ uvicorn api.app:app --host 0.0.0.0 --port 8000   # API for the iPhone app (on th
   have start times when the new parse has none. `video-steps` applies it to stored recipes
   (`ingest.steps_from_video`: video download only, stored ingredients kept): by default every
   ready recipe with no steps whose saved transcript is silent; `--todo` adds needs_recipe
-  posts (they turn ready if the frames give ingredient names). Not yet run against a real vision model; the
-  API doesn't expose `start_seconds` yet.
+  posts (they turn ready if the frames give ingredient names); explicit ids skip the silence
+  check. Verified on the PC (2026-11-04, qwen3.5:9b reads images): 5 stored recipes, 6-20
+  keyframes each, 3-14 steps; step quality not yet reviewed. The API doesn't expose
+  `start_seconds` yet.
 - **Recipe pages** (`RECIPE_RECIPE_PAGES`, default on). When a parse looks incomplete and the
   caption links to a non-social page (`urls.recipe_link`), `webrecipe.fetch_recipe_page` reads its
   schema.org Recipe JSON-LD and the model re-parses with a RECIPE PAGE section. This runs before
