@@ -66,6 +66,9 @@ CREATE TABLE IF NOT EXISTS recipe_steps (
     -- A model-written version of about 40-60 characters for the iOS Dynamic Island and
     -- Lock Screen (NULL until `main.py shorten-steps` or a parse fills it).
     short_text TEXT,
+    -- Seconds into the video where the step starts (only for steps read from the video's
+    -- frames, i.e. silent / music-only videos; NULL otherwise).
+    start_seconds REAL,
     PRIMARY KEY (recipe_id, position)
 );
 
@@ -90,6 +93,7 @@ _ADDED_COLUMNS = [
     # feed and lists, kept in the database so it can be undone and isn't re-downloaded.
     ("recipes", "hidden", "INTEGER NOT NULL DEFAULT 0"),
     ("recipe_steps", "short_text", "TEXT"),
+    ("recipe_steps", "start_seconds", "REAL"),
 ]
 
 

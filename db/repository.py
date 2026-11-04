@@ -23,6 +23,7 @@ def save_recipe(
     ingredients: Iterable[Mapping[str, Any]],
     steps: Iterable[str] = (),
     short_steps: Iterable[str | None] = (),
+    step_times: Iterable[float | None] = (),
     yield_label: str | None = None,
     ingredient_sources: Iterable[str] = (),
     video_id: str | None = None,
@@ -47,7 +48,8 @@ def save_recipe(
     (``needs_recipe`` or ``not_recipe``; left NULL if not given, for ``backfill_status``)
     and ``status_note`` can give details.
 
-    ``short_steps`` are the island versions of ``steps``, by position (missing ones are NULL).
+    ``short_steps`` are the island versions of ``steps``, by position (missing ones are NULL);
+    ``step_times`` likewise the second each step starts in the video.
     """
     sources = ",".join(dict.fromkeys(s for s in ingredient_sources if s)) or None
 
@@ -81,11 +83,12 @@ def save_recipe(
 
         conn.execute("DELETE FROM recipe_ingredients WHERE recipe_id = ?", (recipe_id,))
         conn.execute("DELETE FROM recipe_steps WHERE recipe_id = ?", (recipe_id,))
-        shorts = list(short_steps)
-        pairs = [((t or "").strip(), shorts[n] if n < len(shorts) else None) for n, t in enumerate(steps)]
+        shorts, times = list(short_steps), list(step_times)
+        rows = [((t or "").strip(), shorts[n] if n < len(shorts) else None, times[n] if n < len(times) else None)
+                for n, t in enumerate(steps)]
         conn.executemany(
-            "INSERT INTO recipe_steps (recipe_id, position, text, short_text) VALUES (?, ?, ?, ?)",
-            [(recipe_id, n, text, short) for n, (text, short) in enumerate(p for p in pairs if p[0])],
+            "INSERT INTO recipe_steps (recipe_id, position, text, short_text, start_seconds) VALUES (?, ?, ?, ?, ?)",
+            [(recipe_id, n, *row) for n, row in enumerate(r for r in rows if r[0])],
         )
 
         position = 0
@@ -243,10 +246,12 @@ def get_recipe(conn: sqlite3.Connection, recipe_id: int) -> dict[str, Any] | Non
         )
     ]
     rows = conn.execute(
-        "SELECT text, short_text FROM recipe_steps WHERE recipe_id = ? ORDER BY position", (recipe_id,)
+        "SELECT text, short_text, start_seconds FROM recipe_steps WHERE recipe_id = ? ORDER BY position",
+        (recipe_id,),
     ).fetchall()
     recipe["steps"] = [r[0] for r in rows]
     recipe["short_steps"] = [r[1] for r in rows]  # None where not shortened yet
+    recipe["step_times"] = [r[2] for r in rows]  # None unless read from the video's frames
     return recipe
 
 

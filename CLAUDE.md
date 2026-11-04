@@ -50,7 +50,7 @@ api/jobs.py      in-memory queue for links shared from the phone (POST /api/inge
 ios/             Xcode project: Cookbook app, CookingActivity (Live Activity), AddToCookbook (share
                  extension), Shared/ (both app and widget), tools/ + Art/ (cook flipbook font)
 docs/ios/        iOS app runbook and API contract
-pipeline/        downloader, transcriber, parser, ingest, urls, ocr, webrecipe, thumbnails
+pipeline/        downloader, transcriber, parser, ingest, urls, ocr, frames, webrecipe, thumbnails
 db/              schema, normalize, repository, pantry, step_ingredients
 tests/           pytest suite (no network, Ollama, or Whisper model needed)
 data/            gitignored: recipes.db and temporary downloads
@@ -86,8 +86,8 @@ uvicorn api.app:app --host 0.0.0.0 --port 8000   # API for the iPhone app (on th
 - **Keep the raw text.** `recipe_ingredients.raw_name` stores the original wording; `ingredients.name`
   is the canonical shared name. The same ingredient may appear twice in one recipe.
 - **Record where ingredients came from.** `recipes.ingredient_sources` lists the inputs the parser
-  read them from (`description`, `speech`, `captions`, `title`; `comments` and `on_screen` are
-  reserved for future inputs). `transcript_source` only says which transcript was sent to the model.
+  read them from (`description`, `speech`, `captions`, `title`, `on_screen`, `recipe_page`,
+  `visual` = the vision model's reading of keyframes; `comments` is reserved). `transcript_source` only says which transcript was sent to the model.
 - **English output.** The prompt requires title, yield and ingredient names in English whatever
   the video's language (verified on Spanish, Japanese and Cantonese text with qwen3.5:9b);
   the original-language text stays in `description` / `transcript`.
@@ -115,6 +115,19 @@ uvicorn api.app:app --host 0.0.0.0 --port 8000   # API for the iPhone app (on th
   then re-parsed. The retry is kept only if it has at least as many ingredients. OCR failures
   are logged and never fail an ingest. Raw text goes in `recipes.on_screen_text`. Lazy-import
   EasyOCR (inside `pipeline/ocr.py::_reader`), like faster-whisper.
+- **Visual fallback for silent videos** (`RECIPE_VISUAL`: auto | off). `ingest.is_silent`:
+  no real captions and Whisper heard < `RECIPE_VISUAL_MIN_WORDS` (5) words, sound tags like
+  "[Music]" not counted. In `auto` it runs last (after recipe page and OCR) when the video is
+  silent and the result has no steps or looks incomplete. `pipeline/frames.py` takes ffmpeg
+  keyframes (every `RECIPE_VISUAL_INTERVAL` s + scene changes, `showinfo` timestamps),
+  `parser.parse_visual_recipe` sends them as Ollama `images` with a frame/time list and gets
+  `{"title", "steps": [{"step_number", "timestamp_start", "instruction", "ingredients_used"}]}`
+  (times snapped to the frames shown). `ingest.merge_visual`: written text wins; frames only
+  fill missing steps (times in `recipe_steps.start_seconds`) and, when there's no ingredient
+  list, names without amounts (source label `visual`). One video download is shared with OCR
+  (`ingest.VideoFile`). Failures are logged, never fail an ingest. `reparse` keeps steps that
+  have start times when the new parse has none. Not yet run against a real vision model; the
+  API doesn't expose `start_seconds` yet.
 - **Recipe pages** (`RECIPE_RECIPE_PAGES`, default on). When a parse looks incomplete and the
   caption links to a non-social page (`urls.recipe_link`), `webrecipe.fetch_recipe_page` reads its
   schema.org Recipe JSON-LD and the model re-parses with a RECIPE PAGE section. This runs before

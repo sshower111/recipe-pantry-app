@@ -76,6 +76,11 @@ flowchart TD
   as incomplete. The pipeline then tries the creator's linked recipe page (exact and cheap)
   before OCR (about 3 extra minutes on CPU), and keeps a retry only if it finds at least as
   many ingredients.
+- **Watching silent videos.** When Whisper hears fewer than 5 words (silent or music-only
+  reels) and the text gives no method, ffmpeg takes a keyframe every 2.5 s and at scene
+  changes, with each frame's exact timestamp, and the vision model writes the steps from
+  them (`step_number`, `timestamp_start`, `instruction`, `ingredients_used`). Written text
+  still wins: frames only fill in missing steps, and ingredient names when there is no list.
 - **A second, small model call for short steps.** The island fits about two lines, so each
   step also gets a ~50-character imperative version from the step text and ingredient names.
   With a plain list in the schema the 9B model merged ten steps into one, so the schema has
@@ -189,6 +194,7 @@ main.py                CLI
 pipeline/
   downloader.py        yt-dlp: metadata, captions (VTT -> text), audio; video for OCR
   ocr.py               ffmpeg frame sampling + EasyOCR -> distinct on-screen text lines
+  frames.py            timestamped keyframes (interval + scene change) for the visual parse
   transcriber.py       faster-whisper (model cached, VAD on)
   parser.py            prompts + Ollama calls with JSON-schema output, pydantic validation
   ingest.py            orchestrates the above and saves the result
@@ -241,6 +247,13 @@ amounts, is downloaded again as video, sampled at `RECIPE_OCR_FPS` (near-identic
 dropped, at most `RECIPE_OCR_MAX_FRAMES`), OCR'd, and re-parsed with that text. This adds
 a few minutes per video on CPU. `RECIPE_OCR=always` does it for every video, `off` never.
 Without EasyOCR installed the fallback is skipped with a warning.
+
+**Silent videos:** with `RECIPE_VISUAL=auto` (default), a video with fewer than
+`RECIPE_VISUAL_MIN_WORDS` spoken words whose text gives no steps (or an incomplete recipe) is
+downloaded as video, up to `RECIPE_VISUAL_MAX_FRAMES` keyframes are sent to
+`RECIPE_VISUAL_MODEL` (default: the parsing model), and its steps are stored with the second
+each one starts (`recipe_steps.start_seconds`). The model needs image input; with a text-only
+model the call fails and the fallback is skipped with a warning. `reparse` keeps these steps.
 
 **GPU transcription:** set `RECIPE_WHISPER_DEVICE=cuda` and `RECIPE_WHISPER_COMPUTE_TYPE=float16`.
 This needs the CUDA 12 cuBLAS and cuDNN 9 libraries; see the faster-whisper README.

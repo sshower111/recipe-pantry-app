@@ -78,6 +78,18 @@ class Settings:
     # Fetch the recipe page a caption links to when the video's own text is incomplete.
     recipe_pages: bool
 
+    # Silent / music-only videos: "auto" (speech has fewer than visual_min_words words and the
+    # text gave no method) sends timestamped keyframes to a vision model; "off" never does.
+    visual_mode: str
+    visual_model: str
+    visual_min_words: int
+    visual_interval: float  # seconds between keyframes
+    visual_scene: float | None  # ffmpeg scene-change score that also takes a frame; None = off
+    visual_max_frames: int
+    visual_frame_width: int
+    visual_num_ctx: int
+    visual_timeout: float
+
     pantry_staples: tuple[str, ...]
 
 
@@ -105,6 +117,15 @@ def load_settings() -> Settings:
         ocr_fps=float(_env("OCR_FPS", "1")),
         ocr_max_frames=int(_env("OCR_MAX_FRAMES", "60")),
         recipe_pages=_env_bool("RECIPE_PAGES", True),
+        visual_mode=_env_choice("VISUAL", "auto", ("auto", "off")),
+        visual_model=_env("VISUAL_MODEL", "") or _env("OLLAMA_MODEL", "qwen2.5:7b"),
+        visual_min_words=int(_env("VISUAL_MIN_WORDS", "5")),
+        visual_interval=float(_env("VISUAL_INTERVAL", "2.5")),
+        visual_scene=float(_env("VISUAL_SCENE", "0.4")) if _env("VISUAL_SCENE", "0.4").strip() else None,
+        visual_max_frames=int(_env("VISUAL_MAX_FRAMES", "20")),
+        visual_frame_width=int(_env("VISUAL_FRAME_WIDTH", "512")),
+        visual_num_ctx=int(_env("VISUAL_NUM_CTX", "16384")),
+        visual_timeout=float(_env("VISUAL_TIMEOUT", "600")),
         pantry_staples=_env_list("PANTRY_STAPLES", "salt,black pepper,water,oil"),
     )
 

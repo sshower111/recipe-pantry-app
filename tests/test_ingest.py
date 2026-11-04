@@ -220,7 +220,8 @@ def test_read_video_text_failures_are_not_fatal(monkeypatch, tmp_path):
         raise RuntimeError("no video stream")
 
     monkeypatch.setattr(ingest, "download_video", broken)
-    assert ingest.read_video_text("https://example.com/v", make_cfg(tmp_path)) == ""
+    cfg = make_cfg(tmp_path)
+    assert ingest.read_video_text(ingest.VideoFile("https://example.com/v", cfg), cfg) == ""
 
 
 def test_empty_recipe_records_no_sources(fake, tmp_path):

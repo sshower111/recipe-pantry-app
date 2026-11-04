@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import re
+import shutil
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,7 +15,9 @@ import requests
 from config import Settings, settings as default_settings
 from db import find_recipe_id, get_recipe, save_recipe, set_short_steps, set_status_note
 from pipeline.downloader import MediaAssets, download_media, download_video
-from pipeline.parser import OllamaError, ParsedRecipe, parse_recipe, shorten_steps
+from pipeline.parser import (
+    Ingredient, OllamaError, ParsedRecipe, VisualRecipe, parse_recipe, parse_visual_recipe, shorten_steps,
+)
 from pipeline.thumbnails import save_thumbnail
 from pipeline.urls import canonical_url, classify_missing_recipe, recipe_link
 from pipeline.webrecipe import RecipePageError, WebRecipe, fetch_recipe_page, read_recipe_file
@@ -65,6 +69,24 @@ def choose_transcript(media: MediaAssets, cfg: Settings) -> tuple[str, str]:
     return "", "none"
 
 
+_WORD = re.compile(r"\w+")
+# Whisper / auto-caption sound tags ("[Music]", "(applause)", "♪ ... ♪") that aren't speech.
+_SOUND_TAG = re.compile(r"\[[^\]]*\]|\([^)]*\)|♪[^♪]*♪")
+
+
+def count_words(text: str) -> int:
+    """Spoken words in a transcript, not counting sound tags like "[Music]"."""
+    return len(_WORD.findall(_SOUND_TAG.sub(" ", text)))
+
+
+def is_silent(transcript: str, transcript_source: str, min_words: int) -> bool:
+    """True for a silent or music-only video: real captions count as speech, otherwise
+    Whisper heard fewer than ``min_words`` words (often a stray "Thank you." over music)."""
+    if transcript_source == "captions" and len(transcript) >= MIN_CAPTION_CHARS:
+        return False
+    return count_words(transcript) < min_words
+
+
 def ingredient_sources(recipe: ParsedRecipe, transcript_source: str) -> list[str]:
     """Translate the parser's prompt sections into where the text actually came from."""
     transcript_kind = "captions" if transcript_source == "captions" else "speech"
@@ -80,17 +102,41 @@ def looks_incomplete(recipe: ParsedRecipe | None) -> bool:
     return len(ingredients) < MIN_INGREDIENTS or all(i.amount is None for i in ingredients)
 
 
-def read_video_text(url: str, cfg: Settings) -> str:
-    """Download the video and OCR its frames. OCR is a best-effort fallback, so any
-    failure (EasyOCR missing, no video stream, ffmpeg error) is logged and gives ""."""
+class VideoFile:
+    """The video stream, downloaded on first use and shared by OCR and the visual parse
+    (``download_media`` only fetches audio). A failed download is remembered, not retried."""
+
+    def __init__(self, url: str, cfg: Settings):
+        self.url, self.cfg = url, cfg
+        self._path: Path | None = None
+        self._error: Exception | None = None
+
+    def path(self) -> Path:
+        if self._error is not None:
+            raise self._error
+        if self._path is None:
+            log.info("Downloading video")
+            try:
+                self._path = download_video(self.url, self.cfg.downloads_dir)
+            except Exception as exc:
+                self._error = exc
+                raise
+        return self._path
+
+    def close(self) -> None:
+        if self._path is not None and not self.cfg.keep_media:
+            self._path.unlink(missing_ok=True)
+        self._path = None
+
+
+def read_video_text(video: VideoFile, cfg: Settings) -> str:
+    """OCR the video's frames. OCR is a best-effort fallback, so any failure (EasyOCR
+    missing, no video stream, ffmpeg error) is logged and gives ""."""
     from pipeline.ocr import read_on_screen_text
 
-    video = None
     try:
-        log.info("Downloading video for OCR")
-        video = download_video(url, cfg.downloads_dir)
         text = read_on_screen_text(
-            video,
+            video.path(),
             cfg.downloads_dir,
             languages=cfg.ocr_languages,
             gpu=cfg.ocr_gpu,
@@ -100,11 +146,59 @@ def read_video_text(url: str, cfg: Settings) -> str:
     except Exception as exc:
         log.warning("On-screen text OCR skipped: %s", exc)
         return ""
-    finally:
-        if video is not None and not cfg.keep_media:
-            video.unlink(missing_ok=True)
     log.info("OCR found %d distinct lines of on-screen text", len(text.splitlines()))
     return text
+
+
+def read_video_steps(
+    video: VideoFile, cfg: Settings, *, title: str, description: str, on_screen: str, known_ingredients: list[str]
+) -> VisualRecipe | None:
+    """Sample timestamped keyframes and have the vision model write the method from them.
+    Best effort, like OCR: any failure (no video, ffmpeg, a model without image input,
+    bad output) is logged and gives None."""
+    from pipeline.frames import extract_keyframes
+
+    frames_dir = cfg.downloads_dir / "keyframes"
+    try:
+        path = video.path()
+        frames_dir = cfg.downloads_dir / f"{path.stem}_keyframes"
+        frames = extract_keyframes(
+            path, frames_dir, interval=cfg.visual_interval, scene_threshold=cfg.visual_scene,
+            max_frames=cfg.visual_max_frames, width=cfg.visual_frame_width,
+        )
+        log.info("Reading %d keyframes with %s", len(frames), cfg.visual_model)
+        visual = parse_visual_recipe(
+            [(f.timestamp, f.path.read_bytes()) for f in frames],
+            title=title, description=description, on_screen=on_screen, known_ingredients=known_ingredients,
+            model=cfg.visual_model, base_url=cfg.ollama_url, timeout=cfg.visual_timeout,
+            num_ctx=cfg.visual_num_ctx, think=cfg.ollama_think,
+        )
+    except Exception as exc:
+        log.warning("Visual step parse skipped: %s", exc)
+        return None
+    finally:
+        shutil.rmtree(frames_dir, ignore_errors=True)
+    log.info("Visual parse found %d steps", len(visual.steps))
+    return visual
+
+
+def merge_visual(recipe: ParsedRecipe | None, visual: VisualRecipe) -> tuple[ParsedRecipe, list[float | None]]:
+    """Fill what the text parse lacks from the frames: the steps (with their start times)
+    when it has none, and the ingredient names the steps use (no amounts) when it has no
+    ingredients. Written text wins wherever it exists. Returns the recipe and step times."""
+    if recipe is None:
+        recipe = ParsedRecipe(title=visual.title, sources=[], yield_label=None, ingredients=[])
+    times: list[float | None] = []
+    update: dict = {}
+    if not recipe.steps and visual.steps:
+        update["steps"] = [s.instruction for s in visual.steps]
+        times = [s.timestamp_start for s in visual.steps]
+    if not recipe.ingredients and visual.ingredient_names():
+        update["ingredients"] = [Ingredient(name=n) for n in visual.ingredient_names()]
+        update["sources"] = []  # labelled "visual" by ingredient_sources' caller
+    if not recipe.title.strip() and visual.title:
+        update["title"] = visual.title
+    return recipe.model_copy(update=update), times
 
 
 def read_recipe_page(description: str) -> tuple[WebRecipe | None, str | None]:
@@ -205,14 +299,20 @@ def ingest_url(
 
     log.info("Downloading %s", url)
     media = download_media(url, cfg.downloads_dir, caption_langs=cfg.caption_langs)
+    video = VideoFile(media.url or url, cfg)
     try:
         transcript, source = choose_transcript(media, cfg)
         inputs = ParseInputs(media.title, media.description, transcript, source)
         has_text = bool(transcript or media.description)
+        silent = is_silent(transcript, source, cfg.visual_min_words)
+        if silent:
+            log.info("Little or no speech (%d words): silent/visual-only video", count_words(transcript))
         recipe: ParsedRecipe | None = None
+        step_times: list[float | None] = []
+        from_frames = False
 
         if cfg.ocr_mode == "always" or (cfg.ocr_mode == "auto" and not has_text):
-            inputs.on_screen = read_video_text(media.url or url, cfg)
+            inputs.on_screen = read_video_text(video, cfg)
         if has_text or inputs.on_screen:
             recipe = _parse(inputs, cfg)
 
@@ -224,15 +324,28 @@ def ingest_url(
                 recipe = _better(_parse(inputs, cfg), recipe)
         if cfg.ocr_mode == "auto" and inputs.on_screen is None and looks_incomplete(recipe):
             log.info("Recipe looks incomplete; checking on-screen text")
-            inputs.on_screen = read_video_text(media.url or url, cfg)
+            inputs.on_screen = read_video_text(video, cfg)
             if inputs.on_screen:
                 recipe = _better(_parse(inputs, cfg), recipe)
+        # Last and most expensive: nobody says the method, so watch the video for it.
+        if cfg.visual_mode == "auto" and silent and (recipe is None or not recipe.steps or looks_incomplete(recipe)):
+            visual = read_video_steps(
+                video, cfg, title=media.title, description=media.description, on_screen=inputs.on_screen or "",
+                known_ingredients=[i.name for i in recipe.ingredients] if recipe else [],
+            )
+            if visual is not None and visual.steps:
+                had_ingredients = bool(recipe and recipe.ingredients)
+                recipe, step_times = merge_visual(recipe, visual)
+                from_frames = bool(recipe.ingredients) and not had_ingredients
 
         if recipe is None:
             raise ValueError(f"No captions, speech, description, or on-screen text found for {url}")
 
         # A post without an ingredient list has no source for one, whatever the model says.
-        sources = ingredient_sources(recipe, source) if recipe.ingredients else []
+        if from_frames:
+            sources = ["visual"]
+        else:
+            sources = ingredient_sources(recipe, source) if recipe.ingredients else []
         # Prefer yt-dlp's resolved URL (follows short links); fall back to the input.
         source_url = canonical_url(media.url or url)
         existed = find_recipe_id(conn, source_url) is not None
@@ -246,6 +359,7 @@ def ingest_url(
             ingredients=[i.model_dump() for i in recipe.ingredients],
             steps=recipe.steps,
             short_steps=short_steps(recipe.steps, [i.name for i in recipe.ingredients], cfg),
+            step_times=step_times,
             yield_label=recipe.yield_label,
             ingredient_sources=sources,
             video_id=media.video_id,
@@ -274,6 +388,7 @@ def ingest_url(
             status_note=note,
         )
     finally:
+        video.close()
         if not cfg.keep_media:
             for path in media.files():
                 path.unlink(missing_ok=True)
@@ -341,6 +456,12 @@ def reparse_recipe(
     if not recipe.ingredients and (page is not None or stored["ingredients"]):
         where = page.url or "the saved file" if page else "the saved text"
         raise ValueError(f"No ingredients could be read from {where}; recipe {recipe_id} left as it was")
+    step_times: list[float | None] = []
+    shorts: list[str | None] | None = None
+    if not recipe.steps and any(t is not None for t in stored["step_times"]):
+        # The method was read from the video's frames, which aren't saved: keep it.
+        recipe = recipe.model_copy(update={"steps": stored["steps"]})
+        step_times, shorts = stored["step_times"], stored["short_steps"]
     sources = ingredient_sources(recipe, inputs.transcript_source) if recipe.ingredients else []
     title = recipe.title.strip()
     if title.lower() in _NO_TITLE:
@@ -352,7 +473,8 @@ def reparse_recipe(
         title=title,
         ingredients=[i.model_dump() for i in recipe.ingredients],
         steps=recipe.steps,
-        short_steps=short_steps(recipe.steps, [i.name for i in recipe.ingredients], cfg),
+        short_steps=shorts if shorts is not None else short_steps(recipe.steps, [i.name for i in recipe.ingredients], cfg),
+        step_times=step_times,
         yield_label=recipe.yield_label,
         ingredient_sources=sources,
         video_id=stored["video_id"],
