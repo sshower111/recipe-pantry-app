@@ -1,6 +1,6 @@
 import Foundation
 
-// Display rules shared with the web app (web/lib/api.ts, web/app/recipes/[id]/page.tsx).
+// Display rules for amounts, ingredient labels, captions and island text (see docs/ios/api.md).
 
 extension Ingredient {
     private static let fractions: [(Double, String)] = [

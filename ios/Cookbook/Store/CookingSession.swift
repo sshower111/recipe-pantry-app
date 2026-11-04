@@ -4,7 +4,7 @@ import UserNotifications
 
 /// Cooking progress for the recipe on screen: the step in focus, the steps ticked off and the
 /// step timer. Saved per recipe on every change (CookingStorage), so the Live Activity's step
-/// buttons and a later visit pick it up (web: the recipe page's progress handlers).
+/// buttons and a later visit pick it up.
 @Observable
 final class CookingSession {
     let recipeId: Int

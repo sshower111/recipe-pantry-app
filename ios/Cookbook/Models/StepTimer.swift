@@ -1,6 +1,6 @@
 import Foundation
 
-/// Kitchen timers taken from a step's own wording (web: lib/stepTimer.ts).
+/// Kitchen timers taken from a step's own wording.
 enum StepTimer {
     // "28-32 minutes", "1.5 hours", "10 mins", "30 to 45 seconds"
     private static let pattern = #/(\d+(?:\.\d+)?)(?:\s*(?:-|–|to)\s*\d+(?:\.\d+)?)?\s*(hours?|hrs?|minutes?|mins?|seconds?|secs?)\b/#.ignoresCase()

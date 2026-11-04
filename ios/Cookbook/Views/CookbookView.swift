@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The home feed (web: app/page.tsx) with the pantry built into its search: typing filters by
+/// The home feed, with the pantry built into its search: typing filters by
 /// title and suggests ingredients; picked ingredients re-rank the feed with GET /api/pantry
 /// (the same ranking as `main.py pantry`: most picked ingredients used, then fewest others
 /// needed). The filter chips apply either way.

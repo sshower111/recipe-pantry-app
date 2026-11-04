@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Lays children out left to right, wrapping onto new lines (the web's `flex-wrap`).
+/// Lays children out left to right, wrapping onto new lines.
 struct FlowLayout: Layout {
     var spacing: CGFloat = 8
 

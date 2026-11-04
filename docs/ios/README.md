@@ -11,6 +11,10 @@ cloud.
 > run and debug on the real iPhone. Sections 1-2 below record the original move to the Mac
 > (Xcode, the venv and pytest still work there); sections 3 and 7 are updated for the PC.
 
+> **2026-11-04: the web app was removed**; the project is the iPhone app plus the Python
+> backend. Paths under `web/` below (design tokens, `stepTimer.ts`, the Capacitor draft) refer
+> to it in git history (`git show 4937190:web/...`).
+
 Read with: [`api.md`](api.md) (the exact JSON the app decodes) and the root `CLAUDE.md`.
 
 ```
@@ -228,12 +232,10 @@ Every check runs on the real iPhone against the PC server (no Simulator, see sec
 ## 8. Decided / known gaps
 
 - No cook times in the data (see `api.md`). No ingredient photos (no image source): tiles
-  show the amount in large serif type, as on the web.
+  show a black-and-white icon for the ingredient's kind and the amount.
 - Step-to-ingredient links come from text matching on the server; some steps have none.
-- The web app (`web/`) stays as the desktop/browser version. Its Capacitor Live Activity
-  bridge (`web/lib/liveActivity.ts`, `useLiveActivity.ts`, `LiveActivityToggle.tsx`,
-  `web/native/ios/`) is superseded by the native app and can be removed once the native
-  widget works.
+- The web app and its never-built Capacitor Live Activity bridge were removed once the
+  native app replaced them (2026-11-04).
 - The server has no authentication: fine on a home network, not on the open internet.
 
 ## 9. Kickoff prompt for Claude Code on the Mac

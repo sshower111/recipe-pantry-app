@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// Horizontally scrolling ingredient tiles; the ones the active step uses are highlighted
-/// (web: components/IngredientRow.tsx).
+/// Horizontally scrolling ingredient tiles; the ones the active step uses are highlighted.
 struct IngredientRow: View {
     let ingredients: [Ingredient]
     var active: Set<Int> = []

@@ -154,7 +154,7 @@ final class RecipeStore {
         }
     }
 
-    /// Flips a mark at once and puts it back if the server refuses (as the web app does).
+    /// Flips a mark at once and puts it back if the server refuses.
     func toggle(_ mark: Mark, for id: Int) async {
         guard let current = value(of: mark, for: id) else { return }
         let value = !current

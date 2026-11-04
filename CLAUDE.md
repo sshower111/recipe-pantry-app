@@ -45,12 +45,11 @@ based on available pantry items. Everything runs locally: no cloud APIs.
 config.py        Settings dataclass from RECIPE_* env vars / .env (see .env.example)
 main.py          argparse CLI: init-db | ingest | batch | search | pantry | list | show | import-page |
                  renormalize | thumbnails
-api/app.py       FastAPI JSON server for the web and iOS apps (create_app(db_path, thumbnails_dir, staples, ingest))
+api/app.py       FastAPI JSON server for the iPhone app (create_app(db_path, thumbnails_dir, staples, ingest))
 api/jobs.py      in-memory queue for links shared from the phone (POST /api/ingest)
 ios/             Xcode project: Cookbook app, CookingActivity (Live Activity), AddToCookbook (share
                  extension), Shared/ (both app and widget), tools/ + Art/ (cook flipbook font)
 docs/ios/        iOS app runbook and API contract
-web/             Next.js (App Router) + Tailwind v4 + Framer Motion frontend; proxies /api to :8000
 pipeline/        downloader, transcriber, parser, ingest, urls, ocr, webrecipe, thumbnails
 db/              schema, normalize, repository, pantry, step_ingredients
 tests/           pytest suite (no network, Ollama, or Whisper model needed)
@@ -74,8 +73,7 @@ python main.py reparse <id> [<id> ...] | --missing-steps   # re-run the model on
 python main.py shorten-steps [<id> ...] [--refresh]   # island step versions, no reparse
 python main.py renormalize [--dry-run]   # after normalizer/ALIASES edits
 python main.py thumbnails [--refresh]    # save video thumbnails to data/thumbnails/
-uvicorn api.app:app --port 8000          # API for the web app (add --host 0.0.0.0 for the iPhone)
-cd web; npm run dev                      # web app on :3000 (also .claude/launch.json "api"/"web")
+uvicorn api.app:app --host 0.0.0.0 --port 8000   # API for the iPhone app (on the PC)
 ```
 
 ## Design Rules & Conventions
@@ -166,23 +164,18 @@ cd web; npm run dev                      # web app on :3000 (also .claude/launch
 - **Caption failures** (e.g. YouTube 429) trigger a retry without captions rather than failing.
 - **Pantry staples** (`RECIPE_PANTRY_STAPLES`: salt, black pepper, water, oil) are excluded from
   scoring entirely, not counted as matched.
-- **Web app.** Thumbnails are downloaded at ingest (`MediaAssets.thumbnail_url`,
-  `pipeline/thumbnails.save_thumbnail`) because platform image URLs expire; only the file
-  name is stored (`recipes.thumbnail_file`), failures are logged and never fail an ingest.
-  `favorite`/`tried` are user marks: `save_recipe`'s upsert must never touch them. Per-step
-  ingredients are matched from wording at read time (`db/step_ingredients.py`; uses
-  `normalize_ingredient_name(..., aliases=False)` so "white sugar" isn't just "sugar"), not
-  stored. Step progress lives in the browser's localStorage. Video plays via the platforms'
-  embed players (`urls.embed_url`); Instagram's needs ~326px width, so the mini player
-  scales a full-size iframe down. Ingredient cards show amounts, not photos (no image source).
-  `components/DynamicIslandStep.tsx` is a black top pill (tap to expand) shown while the step
-  card is off screen past the hero, or while a step timer runs; it shares the recipe page's
-  progress handlers (`selectStep`, `completeStep`) with `CookingMode`, never its own state.
-  Timers come from the step's wording (`lib/stepTimer.ts`: "28-32 minutes" -> 28 min).
-- **Web app's Capacitor Live Activity** (`web/native/ios/`, `lib/useLiveActivity.ts`,
-  `LiveActivityToggle`) was never compiled and is superseded by the native app below; it can
-  be removed. In a browser every bridge call is a no-op.
-- **Native iOS app** (`ios/`; built and run on the iPhone, never a Simulator: see Environment).
+- **Thumbnails, marks, step ingredients.** Thumbnails are downloaded at ingest
+  (`MediaAssets.thumbnail_url`, `pipeline/thumbnails.save_thumbnail`) because platform image
+  URLs expire; only the file name is stored (`recipes.thumbnail_file`), failures are logged
+  and never fail an ingest. `favorite`/`tried`/`hidden` are user marks: `save_recipe`'s upsert
+  must never touch them. Per-step ingredients are matched from wording at read time
+  (`db/step_ingredients.py`; uses `normalize_ingredient_name(..., aliases=False)` so "white
+  sugar" isn't just "sugar"), not stored. Step timers come from the step's wording
+  (`ios/Cookbook/Models/StepTimer.swift`: "28-32 minutes" -> 28 min).
+- **The web app** (Next.js in `web/`) was removed on 2026-11-04 at the user's request: this is
+  an iPhone app with a Python backend. It's in git history (`4937190`) if ever needed.
+- **Native iOS app** (`ios/`; built and run on the iPhone, never a Simulator: see Environment;
+  the one exception is the README's demo media, captured in the Simulator with the user's OK).
   - Feed: the search box also takes "what you have" (ingredient chips -> `/api/pantry`
     re-ranks the feed; no separate Pantry tab, the user's choice). Filters All / ❤️ /
     👌🎉 (the API's `tried`, shown as "Cooked" everywhere) / 🔖 (`?status=todo`). Filter

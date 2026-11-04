@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Colors and fonts from the web app (`web/app/globals.css`).
+/// The app's colors and fonts: cream background, sand cards, terracotta accent, serif titles.
 extension Color {
     init(hex: UInt32) {
         self.init(

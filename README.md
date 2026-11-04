@@ -1,27 +1,31 @@
 # Recipe Pantry
 
-Save a cooking reel from Instagram's share sheet and get a structured recipe on your phone a
-couple of minutes later: ingredients, steps and timers, read from the video's caption,
-speech, on-screen text or linked blog by a local AI pipeline. Then search by what's in your
-pantry and cook step by step from the iPhone's Dynamic Island while the video plays.
-Everything runs on your own machines: no cloud APIs.
+An iPhone app that turns the cooking reels you save into recipes you can cook from. Share a
+reel from Instagram and a couple of minutes later it's in your cookbook: ingredients, steps and
+timers, read from the video's caption, speech, on-screen text or linked blog by a local AI
+pipeline. Search by what's in your pantry, then cook step by step from the Dynamic Island while
+the video plays. Everything runs on your own machines: no cloud APIs.
 
 <p align="center">
-  <img src="docs/media/feed.jpg" width="24%" alt="Cookbook feed">
-  <img src="docs/media/pantry.jpg" width="24%" alt="Search by what you have">
-  <img src="docs/media/cooking.jpg" width="24%" alt="Cooking mode with a step timer">
-  <img src="docs/media/island.jpg" width="24%" alt="Step in the Dynamic Island over the reel">
+  <img src="docs/media/feed.jpg" width="32%" alt="Cookbook feed with filters">
+  <img src="docs/media/pantry.jpg" width="32%" alt="Search by what you have: recipes ranked by the ingredients they use">
+  <img src="docs/media/recipe.jpg" width="32%" alt="Recipe screen with ingredient icons">
+</p>
+<p align="center">
+  <img src="docs/media/cooking.jpg" width="32%" alt="Cooking mode: swipeable step card with a running timer">
+  <img src="docs/media/island.jpg" width="32%" alt="Expanded Dynamic Island: step, timer and step controls">
+  <img src="docs/media/lockscreen.jpg" width="32%" alt="Lock Screen Live Activity">
 </p>
 
 <p align="center">
-  <img src="docs/media/demo.gif" width="300" alt="Tap Watch on Instagram, then follow the step in the Dynamic Island">
+  <img src="docs/media/demo.gif" width="300" alt="Leave the recipe and the step follows into the Dynamic Island">
 </p>
 
-<p align="center"><sub>"Watch on Instagram" opens the reel and the current step follows in the
-Dynamic Island. Captured in the iOS Simulator (Instagram's web page stands in for the app).</sub></p>
+<p align="center"><sub>Leave a recipe mid-cook and the step follows: the Dynamic Island pops open
+with the step and its timer. Captured in the iOS Simulator.</sub></p>
 
-**Tech:** Python · yt-dlp · faster-whisper · EasyOCR · Ollama (local LLM, JSON-schema output) ·
-SQLite · FastAPI · SwiftUI · ActivityKit / App Intents · Next.js · Tailwind · pytest (230 tests)
+**Tech:** SwiftUI · ActivityKit / App Intents · Python · yt-dlp · faster-whisper · EasyOCR ·
+Ollama (local LLM, JSON-schema output) · SQLite · FastAPI · pytest (230 tests)
 
 ## What it does
 
@@ -82,21 +86,24 @@ Whisper.
 
 ## iPhone app
 
-Native SwiftUI (iOS 17+), talking to the FastAPI server over home Wi-Fi.
+Native SwiftUI (iOS 17+), talking to the FastAPI server on the PC over home Wi-Fi.
 
 - **Cookbook feed** with search that also takes "what you have": ingredient chips re-rank the
   feed by the pantry query, showing what each recipe uses and what's missing. Filters for
   favorites ❤️, cooked 👌🎉 and saved-for-later 🔖; swipe left to remove (undoable).
-- **Recipe screen**: photo, caption, ingredient tiles, and a cooking mode with one step at a
-  time, its ingredients highlighted, and timers read from the step ("bake for 28-32 minutes"
-  -> 28 min, with a "Time's up" notification).
-- **Live Activity**: starts when you tap "Watch on Instagram" or leave a recipe; ‹ › change the
-  step from the island or Lock Screen (App Intents run in the app's process); a running timer
-  counts down in the island; tapping it opens the recipe at that step. The cook in the corner
-  is an original line drawing in a custom font (one glyph per pose) that changes pose with
-  each step.
-- **Share extension** for adding reels, and an **offline copy** of the feed, every recipe and
-  its photo.
+- **Recipe screen**: photo, caption, and ingredient tiles with a black-and-white icon for each
+  kind of ingredient and its amount. ▶ opens the post in its own app.
+- **Cooking mode**: a step card you swipe between steps, with that step's ingredients and a
+  timer read from its wording ("bake for 20 to 25 minutes" -> 20 min, with a "Time's up"
+  notification). Scroll past it and a compact copy of the card pops up at the top.
+- **Live Activity**, designed to Apple's Live Activity guidelines in the app's look: the step,
+  its ingredients, progress and a running timer in the Dynamic Island and on the Lock Screen.
+  It starts when you play the video or leave a recipe; ‹ › change the step (App Intents run in
+  the app's process), ✕ ends it, closing the app ends it, and tapping it opens the recipe at
+  that step. The cook in the corner is an original line drawing in a custom font, one pose
+  per step.
+- **Share extension** for adding reels, an **offline copy** of the feed, every recipe and its
+  photo, and Settings for the server address.
 
 Code: [`ios/`](ios/) (app, `CookingActivity` widget, `AddToCookbook` share extension). Build
 notes: [docs/ios/README.md](docs/ios/README.md); API contract: [docs/ios/api.md](docs/ios/api.md).
@@ -182,10 +189,9 @@ pipeline/
   urls.py              canonical URLs (share-link variants -> one key), batch file reading
   thumbnails.py        saves each video's thumbnail under data/thumbnails/
 api/
-  app.py               FastAPI JSON server for the iPhone and web apps
+  app.py               FastAPI JSON server for the iPhone app
   jobs.py              background queue for links shared from the phone
 ios/                   SwiftUI app, Live Activity widget, share extension (Xcode project)
-web/                   Next.js + Tailwind + Framer Motion app (browser version)
 db/
   schema.py            recipes / ingredients / recipe_ingredients / recipe_steps + connect()
   normalize.py         canonical ingredient names and units
@@ -248,7 +254,7 @@ python main.py import-page 45 --file ingredients.txt               # ... or past
 python main.py reparse 12 15                   # run the model again on saved recipes (no download)
 python main.py reparse --missing-steps         # add steps to recipes saved before steps existed (~2 min each)
 python main.py renormalize --dry-run          # re-apply name normalization to stored recipes
-python main.py thumbnails                      # save missing video thumbnails (for the web app)
+python main.py thumbnails                      # save missing video thumbnails (shown in the app)
 python main.py search --ingredients "chicken, garlic, soy sauce, rice, eggs" --limit 10
 python main.py pantry eggs butter --json        # same query, space-separated
 ```
@@ -281,49 +287,26 @@ for m in find_recipes_by_pantry(conn, ["chicken", "garlic", "rice"], limit=5):
     print(m.title, f"uses {m.matched} of {m.selected}", m.missing)
 ```
 
-## Web app
+## Running the app
 
-<p align="center">
-  <img src="docs/screenshots/cooking.gif" width="220" alt="Web cooking mode: finishing steps, then the step bar">
-  <img src="docs/screenshots/cookbook.png" width="160" alt="Web cookbook list with video thumbnails">
-  <img src="docs/screenshots/recipe.png" width="160" alt="Web recipe page with hero image">
-  <img src="docs/screenshots/cooking.png" width="160" alt="Web cooking mode showing only that step's ingredients">
-</p>
-
-The browser version: a mobile-first cookbook in `web/` (Next.js, Tailwind, Framer Motion) reads the database
-through a small FastAPI server. Run both (Node 20+):
+The backend runs on a computer that can handle Whisper and a 9B model (mine is a Windows PC);
+the iPhone reaches it over Wi-Fi.
 
 ```bash
-python main.py thumbnails          # once: save thumbnails for recipes stored before the app existed
-uvicorn api.app:app --port 8000    # from the project root, with the venv active
-cd web && npm install && npm run dev   # http://localhost:3000
+python main.py thumbnails                        # once: thumbnails for recipes stored earlier
+uvicorn api.app:app --host 0.0.0.0 --port 8000   # from the project root, with the venv active
 ```
 
-- **Cookbook**: every ready recipe with its video thumbnail, search, and
-  All / Favorites / Tried / To try filters. The heart saves a favorite.
-- **Recipe**: thumbnail hero, ingredient cards, "Mark as tried", and a floating,
-  draggable video player (Instagram, YouTube or TikTok embed) that stays on screen
-  while you cook.
-- **Cooking mode**: one step at a time with only the ingredients that step mentions;
-  "Done, next step" fades finished steps back. Progress is kept per device.
-- **Step timers**: when a step names a time ("bake for 28-32 minutes"), a
-  "Start 28 min timer" button counts it down.
-- **Dynamic Island step bar**: scroll away from the step card and a black pill at the top
-  keeps showing "Step 02/06" and the timer; tap it to open the step, its ingredients and
-  Previous / Next. It stays in sync with the main cooking mode.
-- **Live Activity**: the web app's "Dynamic Island" switch was written for a Capacitor
-  wrapper (`web/native/ios/`) that was never built; the native [iPhone app](#iphone-app) does
-  this for real. In a browser the switch only saves your preference.
+Then open `ios/Cookbook.xcodeproj` in Xcode, set the signing team, and run it on an iPhone
+(iOS 17+) on the same Wi-Fi. Set the server address in the app's Settings, and in
+`AddToCookbook/ShareViewController.swift` for the share sheet. With a free Apple ID the install
+lasts 7 days. Full walkthrough: [docs/ios/README.md](docs/ios/README.md).
 
-New ingests save their thumbnail automatically. Favorite/tried marks live in the
-`recipes` table and survive re-ingesting. Step ingredients are matched from the step's
-wording (`db/step_ingredients.py`), so a step like "combine wet and dry" shows none.
 API: `GET /api/recipes[?status=ready|todo|all]`, `GET /api/recipes/{id}`,
-`PATCH /api/recipes/{id}` (`{"favorite": true}` / `{"tried": true}`),
-`GET /api/recipes/{id}/thumbnail`, `GET /api/ingredients`, `GET /api/pantry?have=a&have=b`.
-Full contract with sample responses (including the iPhone app's ingest jobs):
-[docs/ios/api.md](docs/ios/api.md). `next.config.ts` proxies `/api` to
-`RECIPE_API_ORIGIN` (default `http://127.0.0.1:8000`).
+`PATCH /api/recipes/{id}` (favorite, tried, hidden, status), `GET /api/recipes/{id}/thumbnail`,
+`GET /api/ingredients`, `GET /api/pantry?have=a&have=b`, `POST/GET /api/ingest`. Full contract
+with sample responses: [docs/ios/api.md](docs/ios/api.md). New ingests save their thumbnail
+automatically; marks live in the `recipes` table and survive re-ingesting.
 
 ## Configuration
 

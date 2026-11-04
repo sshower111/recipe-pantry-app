@@ -1,8 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// One recipe: hero, title, caption, pills, actions, ingredients and steps
-/// (web: app/recipes/[id]/page.tsx).
+/// One recipe: hero, title, caption, pills, actions, ingredients and steps.
 struct RecipeDetailView: View {
     let recipeId: Int
     @Environment(RecipeStore.self) private var store

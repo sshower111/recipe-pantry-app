@@ -1,7 +1,8 @@
-"""HTTP API for the web app: a thin JSON layer over the SQLite database.
+"""HTTP API for the iPhone app: a thin JSON layer over the SQLite database, plus a queue for
+posts shared from the phone.
 
-Run with ``uvicorn api.app:app --port 8000`` (the Next.js app in ``web/`` proxies
-``/api/*`` here). ``create_app`` takes explicit paths so tests can use a temporary database.
+Run with ``uvicorn api.app:app --host 0.0.0.0 --port 8000`` so the phone can reach it over
+Wi-Fi. ``create_app`` takes explicit paths so tests can use a temporary database.
 """
 
 from __future__ import annotations

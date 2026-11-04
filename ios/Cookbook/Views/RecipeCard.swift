@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// One row of the cookbook feed (web: components/RecipeCard.tsx). Opens the recipe;
+/// One row of the cookbook feed. Opens the recipe;
 /// the heart sits above the link so tapping it doesn't navigate.
 struct RecipeCard: View {
     let recipe: RecipeSummary

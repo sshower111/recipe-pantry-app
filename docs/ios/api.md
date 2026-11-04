@@ -136,9 +136,9 @@ struct PantryMatch: Codable, Identifiable {
 }
 ```
 
-Display rules the web app uses (match them): amounts as fractions (`0.5` -> `½`, `1.5` ->
-`1½`, `0.333` -> `⅓`; see `web/lib/api.ts::formatAmount`), label = amount + unit + `rawName`
-with the first letter capitalised, captions with `#hashtags` stripped.
+Display rules (the app's `ios/Cookbook/Models/Formatting.swift`): amounts as fractions
+(`0.5` -> `½`, `1.5` -> `1½`, `0.333` -> `⅓`), label = amount + unit + `rawName` with the
+first letter capitalised, captions with `#hashtags` stripped.
 
 ## Samples
 
