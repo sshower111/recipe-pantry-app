@@ -46,17 +46,24 @@ Ollama (local LLM, JSON-schema output) · SQLite · FastAPI · pytest (230 tests
 ## How the AI pipeline works
 
 ```mermaid
-flowchart LR
-    phone["iPhone app<br/>share sheet"] -- "POST /api/ingest" --> api["FastAPI<br/>job queue"]
-    api --> dl["yt-dlp<br/>metadata, captions, audio"]
-    dl --> asr["faster-whisper<br/>(or platform captions)"]
-    asr --> llm["Ollama · qwen3.5:9b<br/>JSON-schema output"]
-    llm -- "too few ingredients<br/>or no amounts" --> fallback["recipe page JSON-LD,<br/>then EasyOCR on frames"]
-    fallback --> llm
-    llm --> short["2nd call: short steps<br/>for the Dynamic Island"]
-    short --> db[("SQLite<br/>normalized ingredients")]
-    db --> api
-    api -- "recipes, pantry search" --> phone
+flowchart TD
+    share["iPhone share sheet<br/>a cooking reel"]
+    subgraph pc ["PC: local, no cloud APIs"]
+        api["FastAPI · job queue"]
+        dl["yt-dlp<br/>caption, subtitles, audio"]
+        asr["faster-whisper<br/>speech to text"]
+        llm["Ollama · qwen3.5:9b<br/>JSON-schema output"]
+        fb["Recipe page JSON-LD,<br/>then EasyOCR on frames"]
+        short["2nd LLM call<br/>short steps for the island"]
+        db[("SQLite<br/>normalized ingredients")]
+    end
+    app["iPhone app<br/>feed, pantry search, cooking, Dynamic Island"]
+    share -- "POST /api/ingest" --> api
+    api --> dl --> asr --> llm
+    llm -. "incomplete" .-> fb
+    fb -.-> llm
+    llm --> short --> db
+    db -- "recipes, pantry search" --> app
 ```
 
 - **Structured output from a local model.** Each parse calls Ollama's `/api/chat` with the
