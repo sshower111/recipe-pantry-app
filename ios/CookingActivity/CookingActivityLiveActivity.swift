@@ -123,7 +123,7 @@ struct CookingActivityLiveActivity: Widget {
     }
 
     private func recipeURL(_ context: ActivityViewContext<CookingActivityAttributes>) -> URL? {
-        URL(string: "cookbook://recipe/\(context.attributes.recipeId)")
+        URL(string: "remnant://recipe/\(context.attributes.recipeId)")
     }
 }
 

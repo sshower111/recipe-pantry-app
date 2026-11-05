@@ -103,7 +103,8 @@
         "ENABLE_USER_SELECTED_FILES": "readonly",
         "GENERATE_INFOPLIST_FILE": "YES",
         "INFOPLIST_FILE": "Cookbook/Info.plist",
-        "INFOPLIST_KEY_NSLocalNetworkUsageDescription": "Cookbook loads your recipes from the server on your Mac.",
+        "INFOPLIST_KEY_CFBundleDisplayName": "Remnant",
+        "INFOPLIST_KEY_NSLocalNetworkUsageDescription": "Remnant loads your recipes from the server on your PC.",
         "INFOPLIST_KEY_NSSupportsLiveActivities": "YES",
         "INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]": "YES",
         "INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]": "YES",
@@ -194,7 +195,7 @@
         "DEVELOPMENT_TEAM": "TJRVJU2LHX",
         "GENERATE_INFOPLIST_FILE": "YES",
         "INFOPLIST_FILE": "AddToCookbook/Info.plist",
-        "INFOPLIST_KEY_CFBundleDisplayName": "Cookbook",
+        "INFOPLIST_KEY_CFBundleDisplayName": "Remnant",
         "INFOPLIST_KEY_NSHumanReadableCopyright": "",
         "IPHONEOS_DEPLOYMENT_TARGET": "17.0",
         "LD_RUNPATH_SEARCH_PATHS": [

@@ -2,7 +2,7 @@
 //  ShareViewController.swift
 //  AddToCookbook
 //
-//  The "Cookbook" entry in the share sheet: sends the shared post's link to the PC
+//  The "Remnant" entry in the share sheet: sends the shared post's link to the PC
 //  (POST /api/ingest, docs/ios/api.md), which downloads and parses it in the background.
 //  The new recipe then appears in the app's feed.
 //
@@ -60,7 +60,7 @@ final class ShareModel {
                 phase = .failed(detail ?? "The PC answered HTTP \(status).")
                 return
             }
-            // A post already in the cookbook finishes almost at once: say so instead of "adding".
+            // A post already in Remnant finishes almost at once: say so instead of "adding".
             for _ in 0..<5 where job.status == "queued" || job.status == "running" {
                 try? await Task.sleep(for: .milliseconds(400))
                 if let (data, _) = try? await URLSession.shared.data(from: serverURL.appending(path: "api/ingest/\(job.id)")),
@@ -157,9 +157,9 @@ struct ShareView: View {
 
     private var title: String {
         switch model.phase {
-        case .sending: "Sending to Cookbook…"
-        case .adding: "Sent to Cookbook"
-        case .alreadyThere: "Already in your Cookbook"
+        case .sending: "Sending to Remnant…"
+        case .adding: "Sent to Remnant"
+        case .alreadyThere: "Already in Remnant"
         case .failed: "Couldn't add it"
         }
     }

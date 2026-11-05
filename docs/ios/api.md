@@ -37,7 +37,7 @@ and an uploader, but the schema allows null for both. 280 of 921 ingredient line
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/recipes` | Cookbook list (`?status=ready\|todo\|all`, default `ready`) |
+| GET | `/api/recipes` | Recipe list (`?status=ready\|todo\|all`, default `ready`) |
 | GET | `/api/recipes/{id}` | One recipe with ingredients, steps (+ step ingredient indexes), video |
 | PATCH | `/api/recipes/{id}` | Set `{"favorite": bool}`, `{"tried": bool}`, `{"hidden": bool}` and/or `{"status": "needs_recipe" \| "not_recipe"}`; returns all four |
 | GET | `/api/recipes/{id}/thumbnail` | The image (JPEG/PNG/WebP); 404 if none |

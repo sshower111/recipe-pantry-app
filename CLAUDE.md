@@ -1,8 +1,16 @@
-# Recipe Pantry App
+# Remnant (repo: recipe-pantry-app)
 
 A local pipeline that ingests cooking shorts/reels, extracts text/audio ingredients locally,
 normalizes them into structured JSON, stores them in SQLite, and lets the user query recipes
 based on available pantry items. Everything runs locally: no cloud APIs.
+
+The app is called **Remnant** ("cook with what's left"; renamed from Cookbook on 2026-11-05):
+display name, share-sheet entry, feed title, app icon (`ios/Art/app-icon/*.svg` -> the
+`AppIcon` PNGs: cream bowl with a sprig on terracotta, user's pick; dark and tinted variants;
+no tossing food or cook-with-a-wok imagery in the icon, the user's rule) and
+the `remnant://recipe/<id>` URL scheme. The Xcode project, targets, folders, Swift type names
+and bundle ids stay `Cookbook` on purpose: a new bundle id would install a second app and lose
+the phone's offline copy and settings.
 
 ## Technology Stack
 
@@ -47,7 +55,7 @@ main.py          argparse CLI: init-db | ingest | batch | search | pantry | list
                  renormalize | thumbnails
 api/app.py       FastAPI JSON server for the iPhone app (create_app(db_path, thumbnails_dir, staples, ingest))
 api/jobs.py      in-memory queue for links shared from the phone (POST /api/ingest)
-ios/             Xcode project: Cookbook app, CookingActivity (Live Activity), AddToCookbook (share
+ios/             Xcode project: Cookbook (= Remnant) app, CookingActivity (Live Activity), AddToCookbook (share
                  extension), Shared/ (both app and widget), tools/ + Art/ (cook flipbook font)
 docs/ios/        iOS app runbook and API contract
 pipeline/        downloader, transcriber, parser, ingest, urls, ocr, frames, webrecipe, thumbnails
