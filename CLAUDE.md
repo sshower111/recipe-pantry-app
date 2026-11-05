@@ -1,8 +1,16 @@
-# Recipe Pantry App
+# Remnant (repo: recipe-pantry-app)
 
 A local pipeline that ingests cooking shorts/reels, extracts text/audio ingredients locally,
 normalizes them into structured JSON, stores them in SQLite, and lets the user query recipes
 based on available pantry items. Everything runs locally: no cloud APIs.
+
+The app is called **Remnant** ("cook with what's left"; renamed from Cookbook on 2026-11-05):
+display name, share-sheet entry, feed title, app icon (`ios/Art/app-icon/*.svg` -> the
+`AppIcon` PNGs: cream bowl with a sprig on terracotta, user's pick; dark and tinted variants;
+no tossing food or cook-with-a-wok imagery in the icon, the user's rule) and
+the `remnant://recipe/<id>` URL scheme. The Xcode project, targets, folders, Swift type names
+and bundle ids stay `Cookbook` on purpose: a new bundle id would install a second app and lose
+the phone's offline copy and settings. Built (Release) and installed on the iPhone 2026-11-05.
 
 ## Technology Stack
 
@@ -47,10 +55,10 @@ main.py          argparse CLI: init-db | ingest | batch | search | pantry | list
                  renormalize | thumbnails
 api/app.py       FastAPI JSON server for the iPhone app (create_app(db_path, thumbnails_dir, staples, ingest))
 api/jobs.py      in-memory queue for links shared from the phone (POST /api/ingest)
-ios/             Xcode project: Cookbook app, CookingActivity (Live Activity), AddToCookbook (share
+ios/             Xcode project: Cookbook (= Remnant) app, CookingActivity (Live Activity), AddToCookbook (share
                  extension), Shared/ (both app and widget), tools/ + Art/ (cook flipbook font)
 docs/ios/        iOS app runbook and API contract
-pipeline/        downloader, transcriber, parser, ingest, urls, ocr, webrecipe, thumbnails
+pipeline/        downloader, transcriber, parser, ingest, urls, ocr, frames, webrecipe, thumbnails
 db/              schema, normalize, repository, pantry, step_ingredients
 tests/           pytest suite (no network, Ollama, or Whisper model needed)
 data/            gitignored: recipes.db and temporary downloads
@@ -71,6 +79,7 @@ python main.py show <id> [--json]
 python main.py import-page <id> [--url <recipe page>] [--file saved.html|list.txt]   # creator's blog
 python main.py reparse <id> [<id> ...] | --missing-steps   # re-run the model on saved text
 python main.py shorten-steps [<id> ...] [--refresh]   # island step versions, no reparse
+python main.py video-steps [<id> ...] [--todo] [--refresh] [--dry-run]   # steps from frames of silent recipes
 python main.py renormalize [--dry-run]   # after normalizer/ALIASES edits
 python main.py thumbnails [--refresh]    # save video thumbnails to data/thumbnails/
 uvicorn api.app:app --host 0.0.0.0 --port 8000   # API for the iPhone app (on the PC)
@@ -86,8 +95,8 @@ uvicorn api.app:app --host 0.0.0.0 --port 8000   # API for the iPhone app (on th
 - **Keep the raw text.** `recipe_ingredients.raw_name` stores the original wording; `ingredients.name`
   is the canonical shared name. The same ingredient may appear twice in one recipe.
 - **Record where ingredients came from.** `recipes.ingredient_sources` lists the inputs the parser
-  read them from (`description`, `speech`, `captions`, `title`; `comments` and `on_screen` are
-  reserved for future inputs). `transcript_source` only says which transcript was sent to the model.
+  read them from (`description`, `speech`, `captions`, `title`, `on_screen`, `recipe_page`,
+  `visual` = the vision model's reading of keyframes; `comments` is reserved). `transcript_source` only says which transcript was sent to the model.
 - **English output.** The prompt requires title, yield and ingredient names in English whatever
   the video's language (verified on Spanish, Japanese and Cantonese text with qwen3.5:9b);
   the original-language text stays in `description` / `transcript`.
@@ -115,6 +124,33 @@ uvicorn api.app:app --host 0.0.0.0 --port 8000   # API for the iPhone app (on th
   then re-parsed. The retry is kept only if it has at least as many ingredients. OCR failures
   are logged and never fail an ingest. Raw text goes in `recipes.on_screen_text`. Lazy-import
   EasyOCR (inside `pipeline/ocr.py::_reader`), like faster-whisper.
+- **Visual fallback for silent videos** (`RECIPE_VISUAL`: auto | off). `ingest.is_silent`:
+  no real captions and Whisper heard < `RECIPE_VISUAL_MIN_WORDS` (5) words, sound tags like
+  "[Music]" not counted. In `auto` it runs last (after recipe page and OCR) when the video is
+  silent and the result has no steps or looks incomplete. `pipeline/frames.py` takes ffmpeg
+  keyframes (every `RECIPE_VISUAL_INTERVAL` s + scene changes, `showinfo` timestamps),
+  `parser.parse_visual_recipe` sends them as Ollama `images` with a frame/time list and gets
+  `{"title", "steps": [{"step_number", "timestamp_start", "instruction", "ingredients_used"}]}`
+  (times snapped to the frames shown). `ingest.merge_visual`: written text wins; frames only
+  fill missing steps (times in `recipe_steps.start_seconds`) and, when there's no ingredient
+  list, names without amounts (source label `visual`). One video download is shared with OCR
+  (`ingest.VideoFile`). Failures are logged, never fail an ingest. `reparse` keeps steps that
+  have start times when the new parse has none. `video-steps` applies it to stored recipes
+  (`ingest.steps_from_video`: video download only, stored ingredients kept): by default every
+  ready recipe with no steps whose saved transcript is silent; `--todo` adds needs_recipe
+  posts (they turn ready if the frames give ingredient names); explicit ids skip the silence
+  check; `--refresh` reads again the steps that have start times (never written steps).
+  The model gets the stored ingredient list with amounts (`parser.ingredient_line`). Prompt
+  rules from the user's review of recipe 54 (2026-11-05): no setup/handling steps (gathering,
+  opening packets, serving suggestions), simple prep folded into the step that uses it
+  ("Fold in the chopped dark chocolate"), amounts written when an ingredient goes in all at
+  once ("Add 80 g granulated sugar"), none for an ingredient split across steps.
+  Verified on the PC (2026-11-04, qwen3.5:9b reads images): 5 stored recipes, 6-20
+  keyframes each, 3-14 steps. Posts with no ingredient list whose caption points elsewhere
+  (`urls.points_elsewhere`: DM me, link in bio, blog) are never read from video, on ingest or
+  by `video-steps` (recipe 39, a "DM for the recipe" post, got a 3-ingredient guess). Start
+  times are stored (they mark steps read from video) but never shown: the user doesn't want
+  timestamps, so `show` and the API leave them out.
 - **Recipe pages** (`RECIPE_RECIPE_PAGES`, default on). When a parse looks incomplete and the
   caption links to a non-social page (`urls.recipe_link`), `webrecipe.fetch_recipe_page` reads its
   schema.org Recipe JSON-LD and the model re-parses with a RECIPE PAGE section. This runs before
@@ -251,7 +287,11 @@ everything):
   tools don't reach a real device. Keep background processes to a minimum.
 - Mac details: macOS 27, default shell bash, Homebrew `python@3.12` (`python3.12`), venv at
   `.venv/` (enough for pytest), Xcode 27. `node@22` is keg-only: `~/.bash_profile` adds
-  `/opt/homebrew/opt/node@22/bin` to PATH. Ollama is installed but should stay idle. The
+  `/opt/homebrew/opt/node@22/bin` to PATH. Ollama is installed but idle; its models were
+  deleted 2026-11-05 when the disk filled up (the build failed with 108 MB free), along with
+  Xcode DerivedData, iOS DeviceSupport and the Simulator devices. Check `df -h /` first if a
+  build fails oddly. `devicectl` device names use a curly apostrophe ("Keith’s iPhone"):
+  install with the UDID instead. The
   Mac's `data/` is a stale copy from the brief 2026-11-03 move; don't treat it as current.
 - Timings quoted above ("~30-40s", "~2 min" per parse, OCR durations) were measured on the PC.
 

@@ -9,7 +9,7 @@
 			<string>com.sshower111.Cookbook</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>cookbook</string>
+				<string>remnant</string>
 			</array>
 		</dict>
 	</array>

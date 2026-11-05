@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<rect width="1024" height="1024" fill="#000000"/>
+<g transform="translate(0,20)">
+<path d="M212 548 H812 A300 300 0 0 1 212 548 Z" fill="#FFFFFF"/>
+<rect x="182" y="520" width="660" height="44" rx="22" fill="#FFFFFF"/>
+<rect x="402" y="830" width="220" height="40" rx="20" fill="#FFFFFF"/>
+<!-- a sprig -->
+<path d="M512 500 C512 420 520 360 540 300" stroke="#FFFFFF" stroke-width="22" fill="none" stroke-linecap="round"/>
+<path d="M530 340 C600 300 660 300 700 330 C650 380 590 380 530 340 Z" fill="#FFFFFF"/>
+<path d="M518 420 C460 370 400 370 360 400 C410 450 470 450 518 420 Z" fill="#FFFFFF"/>
+</g>
+</svg>

@@ -128,9 +128,9 @@ struct CookbookView: View {
             await searchPantry()
         }
         .sheet(isPresented: $showSettings) { SettingsView() }
-        // cookbook://recipe/<id>, from tapping the Live Activity: show that recipe at its step.
+        // remnant://recipe/<id>, from tapping the Live Activity: show that recipe at its step.
         .onOpenURL { url in
-            guard url.scheme == "cookbook", url.host() == "recipe", let id = Int(url.lastPathComponent) else { return }
+            guard url.scheme == "remnant", url.host() == "recipe", let id = Int(url.lastPathComponent) else { return }
             if path.last != id { path = [id] }
             store.stepToReveal = id
         }
@@ -139,7 +139,7 @@ struct CookbookView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center) {
-                Text("Cookbook")
+                Text("Remnant")
                     .font(.serifTitle(46))
                     .foregroundStyle(Color.ink)
                 Spacer()
@@ -333,7 +333,7 @@ struct CookbookView: View {
         case ("failed", _, _): ("Couldn't add a post from \(source)", job.message ?? "The PC couldn't read it.")
         case (_, _, "ready") where job.result != "skipped" || checkingAgain:
             ("Added: \(job.title ?? "new recipe")", "Tap to open it.")
-        case (_, "skipped", _): ("Already saved: \(job.title ?? source)", "It's in your cookbook.")
+        case (_, "skipped", _): ("Already saved: \(job.title ?? source)", "It's already in Remnant.")
         case _ where kept: ("No recipe yet: \(job.title ?? source)",
                             checkingAgain ? "Still nothing to read. It stays in 🔖 for later."
                                           : "Kept in 🔖. Tap to open; Check again there later.")

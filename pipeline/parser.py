@@ -179,7 +179,7 @@ def build_messages(
 
 
 def build_payload(
-    messages: list[dict[str, str]], *, model: str, num_ctx: int = 8192, think: bool | None = False
+    messages: list[dict[str, Any]], *, model: str, num_ctx: int = 8192, think: bool | None = False
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
@@ -312,3 +312,166 @@ def shorten_steps(
             continue
         return [_clean_short(getattr(shorts, key), step) for key, step in zip(keys, steps)]
     raise OllamaError(f"Short steps never validated: {last_error}")
+
+
+# --- Visual parse: silent / music-only videos -------------------------------------------
+
+
+class VisualStep(BaseModel):
+    step_number: int
+    # Seconds into the video where the step begins (the first frame that shows it).
+    timestamp_start: float
+    instruction: str = Field(min_length=1)
+    ingredients_used: list[str] = Field(default_factory=list)
+
+    @field_validator("instruction", mode="before")
+    @classmethod
+    def _strip_instruction(cls, value: Any) -> Any:
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("ingredients_used", mode="before")
+    @classmethod
+    def _clean_names(cls, value: Any) -> Any:
+        if isinstance(value, list):
+            names = (v.strip().lower() for v in value if isinstance(v, str))
+            return list(dict.fromkeys(n for n in names if n))
+        return value
+
+
+class VisualRecipe(BaseModel):
+    """What the model reads from a video's keyframes when nobody speaks."""
+
+    title: str
+    steps: list[VisualStep]
+
+    @classmethod
+    def output_schema(cls) -> dict[str, Any]:
+        """Like ``ParsedRecipe.output_schema``: every field required, nested ones too."""
+        schema = cls.model_json_schema()
+        for model in (schema, *schema.get("$defs", {}).values()):
+            model["required"] = list(model["properties"])
+        return schema
+
+    def tidy(self, frame_times: list[float]) -> VisualRecipe:
+        """Steps in video order, renumbered 1..n, with each start time snapped to the
+        nearest frame actually shown (the model only saw those)."""
+        def snap(t: float) -> float:
+            return min(frame_times, key=lambda f: abs(f - t)) if frame_times else max(t, 0.0)
+
+        steps = sorted(self.steps, key=lambda s: (snap(s.timestamp_start), s.step_number))
+        return VisualRecipe(title=self.title.strip(), steps=[
+            s.model_copy(update={"step_number": n, "timestamp_start": snap(s.timestamp_start)})
+            for n, s in enumerate(steps, 1)
+        ])
+
+    def ingredient_names(self) -> list[str]:
+        """Every ingredient the steps use, once each, in first-used order."""
+        return list(dict.fromkeys(name for step in self.steps for name in step.ingredients_used))
+
+
+VISUAL_PROMPT = """\
+You watch a cooking video that has no useful speech (silent, or music only) and write down
+its method from still frames. You get the frames in order, each labelled with the second of
+the video it was taken at, plus any text the post itself gives.
+
+Return JSON with:
+- "title": a short descriptive recipe name in English ("Garlic Butter Shrimp Pasta").
+- "steps": the cooking actions in order, each as {"step_number", "timestamp_start",
+  "instruction", "ingredients_used"}:
+  - "step_number": 1, 2, 3, ...
+  - "timestamp_start": the label (in seconds) of the first frame that shows this step.
+  - "instruction": one or two plain English sentences in the imperative ("Fry the onions
+    until golden."), describing what the hands, pan or oven are doing.
+  - "ingredients_used": the ingredients this step adds or works with, as generic lowercase
+    singular English names ("egg", "soy sauce", "brown sugar"), no amounts.
+
+Rules:
+- Describe only what the frames (or the post's text) actually show. Never invent steps,
+  ingredients, amounts, temperatures or times. If an amount, temperature or time is written
+  on screen or in the text, keep it exactly.
+- Several frames of the same action are one step. At most 20 steps.
+- Only real cooking steps. Leave out setup and handling: gathering ingredients or equipment,
+  opening packets or jars, unwrapping, weighing out, washing up, serving suggestions ("serve
+  with a glass of milk"), plating-only shots and tasting.
+- Fold simple prep into the step that uses it: not "Chop the chocolate into chunks." then
+  "Fold in the chocolate.", but "Fold in the chopped dark chocolate.". Merge ingredients
+  added one after another into one step ("Add the flour, baking soda and salt.").
+- Say what is mixed, not "combine the ingredients" ("Beat the butter and both sugars until
+  fluffy.").
+- When an INGREDIENT LIST is given, use its names, and write the amount when an ingredient
+  goes in all at once: "Add 80 g granulated sugar.", "Add 0.75 tsp baking soda.". If an
+  ingredient is used in two or more steps (part of it now, the rest later), give no amount
+  for it in any step ("Add half of the butter.", "Add the remaining butter."). Never write
+  an amount the list or the frames don't give.
+- Ignore logos, usernames and calls to action.
+- If the frames show no cooking, return an empty "steps" list.
+"""
+
+
+def ingredient_line(name: str, amount: float | None = None, unit: str | None = None) -> str:
+    """"80 g granulated sugar", "1 egg", "flaky sea salt": an ingredient as the model reads it."""
+    parts = [f"{amount:g}" if amount is not None else "", unit or "", name]
+    return " ".join(p for p in parts if p)
+
+
+def build_visual_messages(
+    frames: list[tuple[float, bytes]],
+    *,
+    title: str = "",
+    description: str = "",
+    on_screen: str = "",
+    known_ingredients: list[str] = (),
+    max_chars: int = 4000,
+) -> list[dict[str, Any]]:
+    """Chat messages for a vision model: the frames as base64 ``images`` on the user
+    message, in order, with a numbered list giving each frame's timestamp."""
+    import base64
+
+    labels = "\n".join(f"Frame {n}: {t:.1f}s" for n, (t, _) in enumerate(frames, 1))
+    user = (
+        f"VIDEO TITLE:\n{title.strip() or '(none)'}\n\n"
+        f"DESCRIPTION / CAPTION:\n{description.strip()[: max_chars // 2] or '(none)'}\n\n"
+    )
+    if on_screen.strip():
+        user += f"ON-SCREEN TEXT (OCR of video frames):\n{on_screen.strip()[: max_chars // 2]}\n\n"
+    if known_ingredients:
+        user += "INGREDIENT LIST (from the post's text):\n" + "\n".join(f"- {n}" for n in known_ingredients) + "\n\n"
+    user += f"FRAMES ({len(frames)}, attached in this order):\n{labels}"
+    images = [base64.b64encode(data).decode("ascii") for _, data in frames]
+    return [{"role": "system", "content": VISUAL_PROMPT}, {"role": "user", "content": user, "images": images}]
+
+
+def parse_visual_recipe(
+    frames: list[tuple[float, bytes]],
+    *,
+    title: str = "",
+    description: str = "",
+    on_screen: str = "",
+    known_ingredients: list[str] = (),
+    model: str = "qwen3.5:9b",
+    base_url: str = "http://localhost:11434",
+    timeout: float = 600,
+    num_ctx: int = 16384,
+    think: bool | None = False,
+    attempts: int = 2,
+) -> VisualRecipe:
+    """Ask a vision model for the step breakdown of a video from its (timestamp, JPEG
+    bytes) keyframes. Needs a model with image input (Ollama's qwen3.5 does)."""
+    if not frames:
+        raise ValueError("No frames to parse")
+    messages = build_visual_messages(
+        frames, title=title, description=description, on_screen=on_screen,
+        known_ingredients=list(known_ingredients),
+    )
+    payload = build_payload(messages, model=model, num_ctx=num_ctx, think=think)
+    payload["format"] = VisualRecipe.output_schema()
+
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        content = call_ollama(payload, base_url=base_url, timeout=timeout)
+        try:
+            return VisualRecipe.model_validate_json(content).tidy([t for t, _ in frames])
+        except (ValidationError, json.JSONDecodeError) as exc:
+            log.warning("Attempt %d: visual parse failed validation: %s", attempt, exc)
+            last_error = exc
+    raise OllamaError(f"Visual parse never validated: {last_error}")

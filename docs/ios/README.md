@@ -15,6 +15,10 @@ cloud.
 > backend. Paths under `web/` below (design tokens, `stepTimer.ts`, the Capacitor draft) refer
 > to it in git history (`git show 4937190:web/...`).
 
+> **2026-11-05: the app is now called Remnant** (home screen, share sheet, feed title, app
+> icon, `remnant://` URL scheme). The Xcode project, targets, folders and bundle ids keep the
+> name `Cookbook` below, so the installed app updates in place instead of becoming a new app.
+
 Read with: [`api.md`](api.md) (the exact JSON the app decodes) and the root `CLAUDE.md`.
 
 ```
@@ -205,8 +209,8 @@ compiled): rename its state fields to the ones above and drop the Capacitor part
 5. **End cooking session** button: end every `Activity<CookingActivityAttributes>.activities`
    and stop the timer. On launch, end any activity left from a killed run.
 6. Live Activities need no special capability or push setup for this (no push updates).
-7. Tapping the Live Activity opens the app: pass `.widgetURL(URL(string: "cookbook://recipe/<id>"))`
-   and handle it with `.onOpenURL` to show that recipe (register the `cookbook` URL scheme).
+7. Tapping the Live Activity opens the app: pass `.widgetURL(URL(string: "remnant://recipe/<id>"))`
+   and handle it with `.onOpenURL` to show that recipe (register the `remnant` URL scheme; `cookbook` before the rename).
 
 The natural flow: "Watch on Instagram" in the app opens the reel in the Instagram app
 (`UIApplication.shared.open(video.url)`), the app goes inactive, and the step appears in the

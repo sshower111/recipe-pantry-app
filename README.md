@@ -1,47 +1,61 @@
-# Recipe Pantry
-
-An iPhone app that turns the cooking reels you save into recipes you can cook from. Share a
-reel from Instagram and a couple of minutes later it's in your cookbook: ingredients, steps and
-timers, read from the video's caption, speech, on-screen text or linked blog by a local AI
-pipeline. Search by what's in your pantry, then cook step by step from the Dynamic Island while
-the video plays. Everything runs on your own machines: no cloud APIs.
-
 <p align="center">
-  <img src="docs/media/feed.jpg" width="32%" alt="Cookbook feed with filters">
-  <img src="docs/media/pantry.jpg" width="32%" alt="Search by what you have: recipes ranked by the ingredients they use">
-  <img src="docs/media/recipe.jpg" width="32%" alt="Recipe screen with ingredient icons">
+  <img src="ios/Cookbook/Assets.xcassets/AppIcon.appiconset/AppIcon-light.png" width="96" alt="Remnant app icon: a bowl with a sprig">
 </p>
+
+<h1 align="center">Remnant</h1>
+
+<p align="center"><b>Cook with what's left.</b></p>
+
+Remnant is an iPhone app that turns the cooking reels you save into recipes you can cook from,
+and tells you which ones you can make with what's left in your kitchen. Share a reel from
+Instagram and a couple of minutes later it's in Remnant: ingredients, steps and timers, read
+from the video's caption, speech, on-screen text, linked blog or, for silent videos, the
+pictures themselves, by a local AI pipeline. Search by what's in your pantry, then cook step by
+step from the Dynamic Island while the video plays. Everything runs on your own machines: no
+cloud APIs.
+
 <p align="center">
+  <img src="docs/media/home.jpg" width="32%" alt="Remnant on the iPhone home screen">
+  <img src="docs/media/feed.jpg" width="32%" alt="Remnant feed: recipes saved from reels, with filters">
+  <img src="docs/media/pantry.jpg" width="32%" alt="Search by what you have: garlic, egg and green onion re-rank the feed">
+</p>
+<p align="center"><sub>The app on the home screen · your saved reels as recipes · add what you have
+and the feed re-ranks by what each recipe uses and still needs</sub></p>
+
+<p align="center">
+  <img src="docs/media/recipe.jpg" width="32%" alt="Recipe screen with ingredient icons and amounts">
   <img src="docs/media/cooking.jpg" width="32%" alt="Cooking mode: swipeable step card with a running timer">
   <img src="docs/media/island.jpg" width="32%" alt="Expanded Dynamic Island: step, timer and step controls">
-  <img src="docs/media/lockscreen.jpg" width="32%" alt="Lock Screen Live Activity">
 </p>
+<p align="center"><sub>Ingredient tiles with icons and amounts · cooking mode with the step's timer
+running · the same step in the Dynamic Island</sub></p>
 
 <p align="center">
-  <img src="docs/media/demo.gif" width="300" alt="Leave the recipe and the step follows into the Dynamic Island">
+  <img src="docs/media/lockscreen.jpg" width="32%" alt="Lock Screen Live Activity">
+  <img src="docs/media/demo.gif" width="32%" alt="Leave the recipe and the step follows into the Dynamic Island">
 </p>
-
-<p align="center"><sub>Leave a recipe mid-cook and the step follows: the Dynamic Island pops open
-with the step and its timer. Captured in the iOS Simulator.</sub></p>
+<p align="center"><sub>The step on the Lock Screen · leave a recipe mid-cook and the step follows
+into the Dynamic Island; › moves to the next one. Captured in the iOS Simulator.</sub></p>
 
 **Tech:** SwiftUI · ActivityKit / App Intents · Python · yt-dlp · faster-whisper · EasyOCR ·
-Ollama (local LLM, JSON-schema output) · SQLite · FastAPI · pytest (230 tests)
+Ollama (local LLM, JSON-schema output, vision) · ffmpeg · SQLite · FastAPI · pytest (260 tests)
 
 ## What it does
 
-- **Share a reel, get a recipe.** "Cookbook" in the iPhone share sheet sends the link to the
+- **Share a reel, get a recipe.** "Remnant" in the iPhone share sheet sends the link to the
   PC, which downloads the post, transcribes it, has a local LLM extract the recipe, and saves
   it; the app shows "Adding..." and then the new recipe. Posts without a recipe yet ("link in
   bio", "coming soon") can be saved for later and checked again.
 - **Multimodal extraction.** Platform captions or Whisper speech-to-text, the post's caption,
-  EasyOCR on video frames when ingredients only appear on screen, and the creator's blog
-  (schema.org Recipe data) when the caption links one. Non-English posts come out in English.
+  EasyOCR on video frames when ingredients only appear on screen, the creator's blog
+  (schema.org Recipe data) when the caption links one, and a vision model watching keyframes
+  when nobody says the method. Non-English posts come out in English.
 - **Cook from the Dynamic Island.** The current step, its ingredients and a running timer stay
   in the island and on the Lock Screen while the reel plays in Instagram, with buttons to move
   between steps. Step text there is a model-written short version of each step.
 - **What can I make?** Ingredient names are normalized ("2 large eggs" and "eggs" are both
   `egg`), so picking what you have ranks recipes by how much of it they use.
-- **Works offline.** The phone keeps a copy of the whole cookbook for when the PC is off.
+- **Works offline.** The phone keeps a copy of every recipe for when the PC is off.
 
 ## How the AI pipeline works
 
@@ -53,7 +67,7 @@ flowchart TD
         dl["yt-dlp<br/>caption, subtitles, audio"]
         asr["faster-whisper<br/>speech to text"]
         llm["Ollama · qwen3.5:9b<br/>JSON-schema output"]
-        fb["Recipe page JSON-LD,<br/>then EasyOCR on frames"]
+        fb["Recipe page JSON-LD,<br/>EasyOCR on frames,<br/>vision model on keyframes"]
         short["2nd LLM call<br/>short steps for the island"]
         db[("SQLite<br/>normalized ingredients")]
     end
@@ -76,6 +90,11 @@ flowchart TD
   as incomplete. The pipeline then tries the creator's linked recipe page (exact and cheap)
   before OCR (about 3 extra minutes on CPU), and keeps a retry only if it finds at least as
   many ingredients.
+- **Watching silent videos.** When Whisper hears fewer than 5 words (silent or music-only
+  reels) and the text gives no method, ffmpeg takes a keyframe every 2.5 s and at scene
+  changes, with each frame's exact timestamp, and the vision model writes the steps from
+  them (`step_number`, `timestamp_start`, `instruction`, `ingredients_used`). Written text
+  still wins: frames only fill in missing steps, and ingredient names when there is no list.
 - **A second, small model call for short steps.** The island fits about two lines, so each
   step also gets a ~50-character imperative version from the step text and ingredient names.
   With a plain list in the schema the 9B model merged ten steps into one, so the schema has
@@ -88,14 +107,14 @@ flowchart TD
 
 From my own collection of 117 saved posts: 90 recipes with 922 ingredient lines (343 distinct
 ingredients after normalization) and 739 steps, 99% of which have a model-written island
-version (73 characters on average, 43 shortened). 230 tests run without network, Ollama or
+version (73 characters on average, 43 shortened). 260 tests run without network, Ollama or
 Whisper.
 
 ## iPhone app
 
 Native SwiftUI (iOS 17+), talking to the FastAPI server on the PC over home Wi-Fi.
 
-- **Cookbook feed** with search that also takes "what you have": ingredient chips re-rank the
+- **Recipe feed** with search that also takes "what you have": ingredient chips re-rank the
   feed by the pantry query, showing what each recipe uses and what's missing. Filters for
   favorites ❤️, cooked 👌🎉 and saved-for-later 🔖; swipe left to remove (undoable).
 - **Recipe screen**: photo, caption, and ingredient tiles with a black-and-white icon for each
@@ -112,7 +131,8 @@ Native SwiftUI (iOS 17+), talking to the FastAPI server on the PC over home Wi-F
 - **Share extension** for adding reels, an **offline copy** of the feed, every recipe and its
   photo, and Settings for the server address.
 
-Code: [`ios/`](ios/) (app, `CookingActivity` widget, `AddToCookbook` share extension). Build
+Code: [`ios/`](ios/) (app, `CookingActivity` widget, `AddToCookbook` share extension; the Xcode
+project and targets keep their first name, `Cookbook`, so the installed app updates in place). Build
 notes: [docs/ios/README.md](docs/ios/README.md); API contract: [docs/ios/api.md](docs/ios/api.md).
 
 ## CLI demo
@@ -189,6 +209,7 @@ main.py                CLI
 pipeline/
   downloader.py        yt-dlp: metadata, captions (VTT -> text), audio; video for OCR
   ocr.py               ffmpeg frame sampling + EasyOCR -> distinct on-screen text lines
+  frames.py            timestamped keyframes (interval + scene change) for the visual parse
   transcriber.py       faster-whisper (model cached, VAD on)
   parser.py            prompts + Ollama calls with JSON-schema output, pydantic validation
   ingest.py            orchestrates the above and saves the result
@@ -241,6 +262,16 @@ amounts, is downloaded again as video, sampled at `RECIPE_OCR_FPS` (near-identic
 dropped, at most `RECIPE_OCR_MAX_FRAMES`), OCR'd, and re-parsed with that text. This adds
 a few minutes per video on CPU. `RECIPE_OCR=always` does it for every video, `off` never.
 Without EasyOCR installed the fallback is skipped with a warning.
+
+**Silent videos:** with `RECIPE_VISUAL=auto` (default), a video with fewer than
+`RECIPE_VISUAL_MIN_WORDS` spoken words whose text gives no steps (or an incomplete recipe) is
+downloaded as video, up to `RECIPE_VISUAL_MAX_FRAMES` keyframes are sent to
+`RECIPE_VISUAL_MODEL` (default: the parsing model), and its steps are stored with the second
+each one starts (`recipe_steps.start_seconds`). The model needs image input; with a text-only
+model the call fails and the fallback is skipped with a warning. `reparse` keeps these steps.
+For recipes saved before this existed, `python main.py video-steps --dry-run` lists the
+silent ones without steps, and `python main.py video-steps` reads their videos (`--todo`
+includes the needs-recipe list).
 
 **GPU transcription:** set `RECIPE_WHISPER_DEVICE=cuda` and `RECIPE_WHISPER_COMPUTE_TYPE=float16`.
 This needs the CUDA 12 cuBLAS and cuDNN 9 libraries; see the faster-whisper README.
