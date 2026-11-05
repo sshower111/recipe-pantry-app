@@ -225,7 +225,9 @@ uvicorn api.app:app --host 0.0.0.0 --port 8000   # API for the iPhone app (on th
     (`Shared/CookingProgress.swift`, UserDefaults), shared with the Live Activity.
   - Recipe screen: ▶ opens the post only in its app (`UIApplication.open` with
     `universalLinksOnly`; no app installed = an alert offering Safari), never a browser on its
-    own: the browser asks people to sign in. Ingredient tiles show black-and-white icons
+    own: the browser asks people to sign in. The top bar is see-through over the photo and
+    turns cream with ink buttons once the photo scrolls away (`pastHero`), so text never slides
+    under bare buttons (seen in the 2026-11-05 demo shot). Ingredient tiles show black-and-white icons
     (`Models/IngredientIcon.swift`, keyword rules on the canonical name, specific first):
     proteins as their animal (cow, pig, chicken, duck, fish), one mixed-vegetables icon for
     every vegetable, one fruits icon; sources/licenses in `ios/Art/icons` (Health Icons CC0,

@@ -18,6 +18,9 @@ struct RecipeDetailView: View {
     @State private var showStepBar = false
     @State private var hideStepBar: Task<Void, Never>?
     @State private var lastScrollY: CGFloat?
+    /// The photo has scrolled up behind the top buttons: the bar turns cream and the buttons ink,
+    /// so text never slides under bare buttons ("C‹oking Steps").
+    @State private var pastHero = false
     /// "Check again" sent and not yet confirmed by the PC (no recipe yet posts).
     @State private var checkRequested = false
     @State private var checkError: String?
@@ -56,7 +59,8 @@ struct RecipeDetailView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbarBackground(Color.cream, for: .navigationBar)
+        .toolbarBackground(pastHero ? .visible : .hidden, for: .navigationBar)
         .toolbar {
             if let recipe = store.details[recipeId] {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -68,11 +72,11 @@ struct RecipeDetailView: View {
                         Image(systemName: recipe.favorite ? "heart.fill" : "heart")
                             .symbolRenderingMode(.monochrome)
                             .fontWeight(.medium)
-                            .foregroundStyle(recipe.favorite ? Color.heart : Color.softWhite)
+                            .foregroundStyle(recipe.favorite ? Color.heart : (pastHero ? Color.ink : Color.softWhite))
                             .shadow(color: .black.opacity(0.3), radius: 1.5, y: 0.5)  // readable on light photos
                             .symbolEffect(.bounce, value: recipe.favorite)
                     }
-                    .tint(recipe.favorite ? Color.heart : Color.softWhite)
+                    .tint(recipe.favorite ? Color.heart : (pastHero ? Color.ink : Color.softWhite))
                     .accessibilityLabel(recipe.favorite ? "Remove from favorites" : "Add to favorites")
                     .sensoryFeedback(.selection, trigger: recipe.favorite)
                 }
@@ -84,8 +88,9 @@ struct RecipeDetailView: View {
                   primaryButton: .default(Text("Open in Safari")) { openURL(missing.url) },
                   secondaryButton: .cancel())
         }
-        // The system back arrow takes the tint: soft white over the photo, like the heart.
-        .tint(.softWhite)
+        // The system back arrow takes the tint: soft white over the photo, like the heart; ink on
+        // the cream bar once the photo has scrolled away.
+        .tint(pastHero ? Color.ink : Color.softWhite)
         // Refresh on every visit (steps may have been re-parsed on the PC); cached copy shows meanwhile.
         .task { await load() }
         // Back to the cookbook: leaving the app no longer starts the island for this recipe.
@@ -205,6 +210,11 @@ struct RecipeDetailView: View {
             .overlay { Thumbnail(url: store.thumbnailURL(recipe.thumbnailUrl), title: recipe.title, initialSize: 96, maxPoints: 500) }
             .clipShape(.rect(cornerRadius: 32))
             .padding(.horizontal, 12)
+            // Screen position of the photo's bottom edge: under ~110 pt it's behind the status bar
+            // and the top buttons (Dynamic Island phones: ~54 pt status bar + 44 pt bar).
+            .onGeometryChange(for: Bool.self) { $0.frame(in: .global).maxY < 110 } action: { past in
+                withAnimation(.easeOut(duration: 0.2)) { pastHero = past }
+            }
     }
 
     private func header(_ recipe: Recipe) -> some View {
