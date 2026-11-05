@@ -31,16 +31,14 @@ struct RecipeDetailView: View {
             if let recipe = store.details[recipeId] {
                 content(recipe)
             } else if let error {
-                ContentUnavailableView {
-                    Label("Couldn't load this recipe", systemImage: "fork.knife")
-                } description: {
-                    Text(error)
-                } actions: {
+                ParseErrorView(title: "Couldn't load this recipe", message: error) {
                     Button("Try again") { Task { await load() } }
                         .tint(.terracotta)
                 }
+                .padding(32)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ProgressView()
+                ChefLoadingView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }

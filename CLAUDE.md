@@ -253,8 +253,18 @@ uvicorn api.app:app --host 0.0.0.0 --port 8000   # API for the iPhone app (on th
     ‹ › run `ChangeStepIntent` (a LiveActivityIntent, so in the app's process: no App Group
     needed). Keep the Lock Screen card and expanded island under ~160 pt, or iOS crops them.
     Island text prefers the server's `short_text`, else `Step.islandText`'s regex shortening.
-  - The corner cook: `CookFlip.ttf`'s digits are 10 outline poses; the widget shows one per
-    step (`CookFrame`). A 1 frame/s flipbook through `Text(timerInterval:)` in that font was
+  - The pixel chef (2026-11-05, user's frames; `ios/Shared/ChefMascot.swift`,
+    `Shared/ChefMascot.xcassets` in both targets, source GIFs in `ios/Art/chef-mascot`):
+    assets `chef_<state>_<n>`; every Image of it uses `.interpolation(.none)`.
+    `AnimatedChefView` steps frames on a task clock (still under Reduce Motion). States: splash
+    (`SplashScreenView`, 1.4 s over the feed at launch), refresh (feed pull-to-refresh, the
+    system spinner tinted clear), loading (shared-post cards, recipe loading), empty (❤️),
+    success (all steps done), error (failed share, recipe load). Only `chef_toss_0...8`
+    (68 px, 5 fps) exist so far: any state whose `_0` frame is missing plays the toss. The
+    Live Activity can't animate, so it shows stills (`ChefStill`, a pose per step): toss in
+    expanded/Lock Screen, `head_compact` compact, `wok_minimal` minimal (timer wins there).
+  - The old corner cook (replaced by the pixel chef; font still bundled, unused):
+    `CookFlip.ttf`'s digits are 10 outline poses, one per step (`CookFrame`). A 1 frame/s flipbook through `Text(timerInterval:)` in that font was
     tried and doesn't render: iOS draws timer text itself and ignores custom fonts (verified
     in the Simulator: static text in the font shows, the timer is blank). Rebuild with
     `ios/tools/draw_cook_frames.swift` -> `ios/Art/cook-frames/*.svg` ->
