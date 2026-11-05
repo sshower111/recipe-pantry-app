@@ -138,8 +138,11 @@ uvicorn api.app:app --host 0.0.0.0 --port 8000   # API for the iPhone app (on th
   ("Fold in the chopped dark chocolate"), amounts written when an ingredient goes in all at
   once ("Add 80 g granulated sugar"), none for an ingredient split across steps.
   Verified on the PC (2026-11-04, qwen3.5:9b reads images): 5 stored recipes, 6-20
-  keyframes each, 3-14 steps. The API doesn't expose
-  `start_seconds` yet.
+  keyframes each, 3-14 steps. Posts with no ingredient list whose caption points elsewhere
+  (`urls.points_elsewhere`: DM me, link in bio, blog) are never read from video, on ingest or
+  by `video-steps` (recipe 39, a "DM for the recipe" post, got a 3-ingredient guess). Start
+  times are stored (they mark steps read from video) but never shown: the user doesn't want
+  timestamps, so `show` and the API leave them out.
 - **Recipe pages** (`RECIPE_RECIPE_PAGES`, default on). When a parse looks incomplete and the
   caption links to a non-social page (`urls.recipe_link`), `webrecipe.fetch_recipe_page` reads its
   schema.org Recipe JSON-LD and the model re-parses with a RECIPE PAGE section. This runs before

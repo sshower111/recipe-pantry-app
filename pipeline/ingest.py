@@ -20,7 +20,7 @@ from pipeline.parser import (
     shorten_steps,
 )
 from pipeline.thumbnails import save_thumbnail
-from pipeline.urls import canonical_url, classify_missing_recipe, recipe_link
+from pipeline.urls import canonical_url, classify_missing_recipe, points_elsewhere, recipe_link
 from pipeline.webrecipe import RecipePageError, WebRecipe, fetch_recipe_page, read_recipe_file
 
 log = logging.getLogger(__name__)
@@ -328,8 +328,12 @@ def ingest_url(
             inputs.on_screen = read_video_text(video, cfg)
             if inputs.on_screen:
                 recipe = _better(_parse(inputs, cfg), recipe)
-        # Last and most expensive: nobody says the method, so watch the video for it.
-        if cfg.visual_mode == "auto" and silent and (recipe is None or not recipe.steps or looks_incomplete(recipe)):
+        # Last and most expensive: nobody says the method, so watch the video for it. Not for
+        # posts whose caption has no list and says the recipe is elsewhere ("DM me for the
+        # recipe"): the frames would only give a guess at someone else's recipe.
+        elsewhere = not (recipe and recipe.ingredients) and points_elsewhere(media.description)
+        if (cfg.visual_mode == "auto" and silent and not elsewhere
+                and (recipe is None or not recipe.steps or looks_incomplete(recipe))):
             visual = read_video_steps(
                 video, cfg, title=media.title, description=media.description, on_screen=inputs.on_screen or "",
                 known_ingredients=[ingredient_line(i.name, i.amount, i.unit) for i in recipe.ingredients] if recipe else [],
@@ -544,6 +548,9 @@ def steps_from_video(
     stored = get_recipe(conn, recipe_id)
     if stored is None:
         raise ValueError(f"No recipe with id {recipe_id}")
+    if not stored["ingredients"] and points_elsewhere(stored["description"] or ""):
+        raise ValueError(f"Recipe {recipe_id}'s caption says the recipe is elsewhere (DM, link in bio, blog); "
+                         "its video isn't read")
     if refresh and has_video_steps(stored):
         stored["steps"], stored["step_times"] = [], []
     video = VideoFile(stored["source_url"], cfg)

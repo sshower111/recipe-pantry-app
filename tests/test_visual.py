@@ -302,7 +302,11 @@ def test_steps_from_video_keeps_ingredients(monkeypatch, tmp_path):
 
 
 def test_steps_from_video_fills_a_todo_post(monkeypatch, tmp_path):
-    conn, _, _, todo = stored_db()
+    conn = connect(":memory:")
+    # Saved for later from the phone; the caption doesn't point anywhere else.
+    todo = save_recipe(conn, source_url="https://www.instagram.com/p/S4/", title="Post by chef", ingredients=[],
+                       description="so good 😋", transcript="", transcript_source="none", status="needs_recipe",
+                       status_note="HTTP 403")
     monkeypatch.setattr(ingest, "read_video_steps", lambda video, cfg, **kw: VISUAL)
     ingest.steps_from_video(conn, todo, cfg(tmp_path))
     after = get_recipe(conn, todo)
@@ -334,10 +338,11 @@ def test_video_steps_command_picks_silent_recipes(monkeypatch, tmp_path, capsys)
     assert read == []
 
     assert main.main(["video-steps", "--todo"]) == 0
-    assert sorted(read) == ["https://www.instagram.com/p/S1/", "https://www.instagram.com/p/S3/"]
+    assert read == ["https://www.instagram.com/p/S1/"]  # S3's caption says the recipe is on a blog
+    assert "Skipping 1 post whose caption says the recipe is elsewhere" in capsys.readouterr().out
 
 
-def test_show_prints_step_start_times(monkeypatch, tmp_path, capsys):
+def test_show_hides_step_start_times(monkeypatch, tmp_path, capsys):
     import main
 
     path = tmp_path / "r.db"
@@ -348,7 +353,28 @@ def test_show_prints_step_start_times(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(main, "settings", dataclasses.replace(main.settings, db_path=path))
     main.main(["show", str(rid)])
     out = capsys.readouterr().out
-    assert "1. [0:00] Rinse the rice." in out and "2. [1:12] Fry it." in out
+    assert "1. Rinse the rice." in out and "2. Fry it." in out  # the user doesn't want times shown
+
+
+def test_dm_for_recipe_post_is_not_read_from_video(monkeypatch, tmp_path):
+    conn = connect(":memory:")
+    rid = save_recipe(conn, source_url="https://www.instagram.com/p/D1/", title="Post by chef", ingredients=[],
+                      description="Comment COOKIE and I'll DM you the recipe", transcript="",
+                      transcript_source="none", status="needs_recipe")
+    monkeypatch.setattr(ingest, "read_video_steps", lambda *a, **k: pytest.fail("video must not be read"))
+    with pytest.raises(ValueError, match="elsewhere"):
+        ingest.steps_from_video(conn, rid, cfg(tmp_path))
+    assert get_recipe(conn, rid)["status"] == "needs_recipe"
+
+
+def test_ingest_skips_frames_for_dm_for_recipe_posts(monkeypatch, tmp_path):
+    fake = Pipeline(monkeypatch, description="Comment COOKIE and I'll DM you the recipe", ingredients=[])
+    conn = connect(":memory:")
+    result = ingest_url("https://www.instagram.com/p/V1/", conn, cfg(tmp_path))
+    assert fake.visual_calls == []
+    stored = get_recipe(conn, result.recipe_id)
+    assert (stored["status"], stored["ingredients"], stored["steps"]) == ("needs_recipe", [], [])
+
 
 
 def test_ingredient_line():

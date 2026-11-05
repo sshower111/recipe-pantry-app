@@ -275,6 +275,7 @@ def cmd_video_steps(args: argparse.Namespace) -> int:
     none: the given ids, else every ready recipe without steps whose saved transcript has
     (almost) no speech (with --todo, the needs-recipe list too). Keeps going past failures."""
     from pipeline.ingest import has_video_steps, steps_from_video, stored_is_silent
+    from pipeline.urls import points_elsewhere
 
     conn = open_db()
     ids = list(dict.fromkeys(args.recipe_ids))
@@ -284,6 +285,12 @@ def cmd_video_steps(args: argparse.Namespace) -> int:
     elif not ids:
         statuses = ["ready", "needs_recipe"] if args.todo else ["ready"]
         no_steps = [r for r in list_recipes(conn, statuses) if not r["step_count"]]
+        if args.todo:  # "DM me for the recipe" posts: the video shows cooking, not the recipe
+            elsewhere = [r for r in no_steps if not r["ingredient_count"] and points_elsewhere(r["description"] or "")]
+            if elsewhere:
+                print(f"Skipping {len(elsewhere)} post{'s' * (len(elsewhere) != 1)} whose caption says the recipe "
+                      "is elsewhere (DM, link in bio, blog)")
+            no_steps = [r for r in no_steps if r not in elsewhere]
         silent = [r for r in no_steps if stored_is_silent(get_recipe(conn, r["id"]), settings)]
         spoken = len(no_steps) - len(silent)
         print(f"{len(no_steps)} recipe{'s' * (len(no_steps) != 1)} without steps: {len(silent)} silent or "
@@ -420,11 +427,8 @@ def cmd_show(args: argparse.Namespace) -> int:
     if recipe["steps"]:
         print("\nSteps:")
         width = len(str(len(recipe["steps"])))
-        times = recipe.get("step_times") or []
         for n, step in enumerate(recipe["steps"], 1):
-            t = times[n - 1] if n <= len(times) else None
-            at = f"[{int(t) // 60}:{int(t) % 60:02d}] " if t is not None else ""  # read from the video
-            print(f"  {n:>{width}}. {at}{step}")
+            print(f"  {n:>{width}}. {step}")
     else:
         print("\nSteps: not described in the post (try `reparse` if it was saved before steps existed)")
     return 0
