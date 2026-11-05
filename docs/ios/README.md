@@ -67,7 +67,7 @@ The code is on GitHub. **The data is not**, and must never be committed (the rep
    ```
 3. **Project**:
    ```bash
-   git clone -b ios-app https://github.com/sshower111/recipe-pantry-app.git && cd recipe-pantry-app
+   git clone -b ios-app https://github.com/sshower111/remnant.git && cd remnant
    python3.12 -m venv .venv && source .venv/bin/activate
    pip install -r requirements-dev.txt          # + requirements-ocr.txt if you want OCR
    mkdir -p data && cp <copied>/recipes-export.db data/recipes.db

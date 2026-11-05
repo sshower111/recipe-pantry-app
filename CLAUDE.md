@@ -1,4 +1,4 @@
-# Remnant (repo: recipe-pantry-app)
+# Remnant
 
 A local pipeline that ingests cooking shorts/reels, extracts text/audio ingredients locally,
 normalizes them into structured JSON, stores them in SQLite, and lets the user query recipes
@@ -308,4 +308,6 @@ everything):
 - OCR verified on a synthetic text-only video (all lines read, parsed correctly) and on the real
   Instagram reel (`RECIPE_OCR=always`: 60 frames, ~4.5 min total vs ~1.5 min without). Not yet
   tested on a real reel whose ingredients appear only on screen.
-- Public on GitHub: https://github.com/sshower111/recipe-pantry-app (MIT).
+- Public on GitHub: https://github.com/sshower111/remnant (MIT; renamed from `recipe-pantry-app`
+  on 2026-11-05, old links redirect). Local clones on the PC and Mac may still sit in folders
+  named `recipe-pantry-app`.

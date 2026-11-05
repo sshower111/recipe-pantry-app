@@ -57,7 +57,7 @@ def create_app(
     """``staples`` (salt, water, ...) are left out of pantry scoring unless a request
     asks for them (``include_staples``). ``ingest(url)`` runs one shared link through the
     pipeline (returning a ``pipeline.ingest.IngestResult``); without it, /api/ingest is off."""
-    app = FastAPI(title="Recipe Pantry API")
+    app = FastAPI(title="Remnant API")
     jobs = IngestQueue(ingest, key=canonical_url) if ingest else None
 
     def db() -> Iterator[sqlite3.Connection]:
