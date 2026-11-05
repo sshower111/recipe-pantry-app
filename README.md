@@ -15,22 +15,27 @@ step from the Dynamic Island while the video plays. Everything runs on your own 
 cloud APIs.
 
 <p align="center">
-  <img src="docs/media/feed.jpg" width="32%" alt="Remnant feed with filters">
-  <img src="docs/media/pantry.jpg" width="32%" alt="Search by what you have: recipes ranked by the ingredients they use">
-  <img src="docs/media/recipe.jpg" width="32%" alt="Recipe screen with ingredient icons">
+  <img src="docs/media/home.jpg" width="32%" alt="Remnant on the iPhone home screen">
+  <img src="docs/media/feed.jpg" width="32%" alt="Remnant feed: recipes saved from reels, with filters">
+  <img src="docs/media/pantry.jpg" width="32%" alt="Search by what you have: garlic, egg and green onion re-rank the feed">
 </p>
+<p align="center"><sub>The app on the home screen · your saved reels as recipes · add what you have
+and the feed re-ranks by what each recipe uses and still needs</sub></p>
+
 <p align="center">
+  <img src="docs/media/recipe.jpg" width="32%" alt="Recipe screen with ingredient icons and amounts">
   <img src="docs/media/cooking.jpg" width="32%" alt="Cooking mode: swipeable step card with a running timer">
   <img src="docs/media/island.jpg" width="32%" alt="Expanded Dynamic Island: step, timer and step controls">
-  <img src="docs/media/lockscreen.jpg" width="32%" alt="Lock Screen Live Activity">
 </p>
+<p align="center"><sub>Ingredient tiles with icons and amounts · cooking mode with the step's timer
+running · the same step in the Dynamic Island</sub></p>
 
 <p align="center">
-  <img src="docs/media/demo.gif" width="300" alt="Leave the recipe and the step follows into the Dynamic Island">
+  <img src="docs/media/lockscreen.jpg" width="32%" alt="Lock Screen Live Activity">
+  <img src="docs/media/demo.gif" width="32%" alt="Leave the recipe and the step follows into the Dynamic Island">
 </p>
-
-<p align="center"><sub>Leave a recipe mid-cook and the step follows: the Dynamic Island pops open
-with the step and its timer. Captured in the iOS Simulator.</sub></p>
+<p align="center"><sub>The step on the Lock Screen · leave a recipe mid-cook and the step follows
+into the Dynamic Island; › moves to the next one. Captured in the iOS Simulator.</sub></p>
 
 **Tech:** SwiftUI · ActivityKit / App Intents · Python · yt-dlp · faster-whisper · EasyOCR ·
 Ollama (local LLM, JSON-schema output, vision) · ffmpeg · SQLite · FastAPI · pytest (260 tests)

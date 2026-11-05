@@ -52,3 +52,14 @@ another colourful dish. Never a 🔖 or "not a recipe" post. Nothing personal in
 Replace the old images (`docs/media/*.jpg`, `demo.gif`) with the new ones, add `home.jpg`
 and `share.gif` to the top section, and keep each caption to one line saying what to look
 at. Commit the media with the README change; delete images no longer used.
+
+## Status (2026-11-05)
+
+Captured: every still and `demo.gif` (pork belly, recipe 114: the cookies photo shows the
+creator). Not yet: `share.gif` (needs a reel the user picks; it adds a real recipe on the PC).
+`home.jpg` has the icon at the end of the second row: the simulator tool's drags couldn't move
+it to the dock. Notes for next time: Xcode 27 here has no Simulator.app, so create the device
+(`xcrun simctl create "iPhone 17 Pro" com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro
+com.apple.CoreSimulator.SimRuntime.iOS-27-2`) and run it headless; add `--mask black` to
+`screenshot`/`recordVideo` for the island cutout; `recordVideo` and the expanded island after
+an app leaves show in screenshots, but an island expanded by long-press doesn't (the video has it).
