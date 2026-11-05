@@ -10,7 +10,7 @@ display name, share-sheet entry, feed title, app icon (`ios/Art/app-icon/*.svg` 
 no tossing food or cook-with-a-wok imagery in the icon, the user's rule) and
 the `remnant://recipe/<id>` URL scheme. The Xcode project, targets, folders, Swift type names
 and bundle ids stay `Cookbook` on purpose: a new bundle id would install a second app and lose
-the phone's offline copy and settings.
+the phone's offline copy and settings. Built (Release) and installed on the iPhone 2026-11-05.
 
 ## Technology Stack
 
@@ -287,7 +287,11 @@ everything):
   tools don't reach a real device. Keep background processes to a minimum.
 - Mac details: macOS 27, default shell bash, Homebrew `python@3.12` (`python3.12`), venv at
   `.venv/` (enough for pytest), Xcode 27. `node@22` is keg-only: `~/.bash_profile` adds
-  `/opt/homebrew/opt/node@22/bin` to PATH. Ollama is installed but should stay idle. The
+  `/opt/homebrew/opt/node@22/bin` to PATH. Ollama is installed but idle; its models were
+  deleted 2026-11-05 when the disk filled up (the build failed with 108 MB free), along with
+  Xcode DerivedData, iOS DeviceSupport and the Simulator devices. Check `df -h /` first if a
+  build fails oddly. `devicectl` device names use a curly apostrophe ("Keith’s iPhone"):
+  install with the UDID instead. The
   Mac's `data/` is a stale copy from the brief 2026-11-03 move; don't treat it as current.
 - Timings quoted above ("~30-40s", "~2 min" per parse, OCR durations) were measured on the PC.
 
