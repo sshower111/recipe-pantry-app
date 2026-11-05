@@ -335,3 +335,17 @@ def test_video_steps_command_picks_silent_recipes(monkeypatch, tmp_path, capsys)
 
     assert main.main(["video-steps", "--todo"]) == 0
     assert sorted(read) == ["https://www.instagram.com/p/S1/", "https://www.instagram.com/p/S3/"]
+
+
+def test_show_prints_step_start_times(monkeypatch, tmp_path, capsys):
+    import main
+
+    path = tmp_path / "r.db"
+    conn = connect(path)
+    rid = save_recipe(conn, source_url="https://www.instagram.com/p/T1/", title="Rice", ingredients=[{"name": "rice"}],
+                      steps=["Rinse the rice.", "Fry it."], step_times=[0.0, 72.5])
+    conn.close()
+    monkeypatch.setattr(main, "settings", dataclasses.replace(main.settings, db_path=path))
+    main.main(["show", str(rid)])
+    out = capsys.readouterr().out
+    assert "1. [0:00] Rinse the rice." in out and "2. [1:12] Fry it." in out

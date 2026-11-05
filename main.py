@@ -417,8 +417,11 @@ def cmd_show(args: argparse.Namespace) -> int:
     if recipe["steps"]:
         print("\nSteps:")
         width = len(str(len(recipe["steps"])))
+        times = recipe.get("step_times") or []
         for n, step in enumerate(recipe["steps"], 1):
-            print(f"  {n:>{width}}. {step}")
+            t = times[n - 1] if n <= len(times) else None
+            at = f"[{int(t) // 60}:{int(t) % 60:02d}] " if t is not None else ""  # read from the video
+            print(f"  {n:>{width}}. {at}{step}")
     else:
         print("\nSteps: not described in the post (try `reparse` if it was saved before steps existed)")
     return 0
