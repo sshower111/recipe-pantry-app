@@ -86,7 +86,7 @@ def test_build_visual_messages_attaches_frames_in_order():
     user = messages[1]
     assert user["images"] == ["YQ==", "Yg=="]  # base64, same order as the labels
     assert "Frame 1: 0.0s\nFrame 2: 2.5s" in user["content"]
-    assert "INGREDIENTS ALREADY FOUND IN THE TEXT:\n- rice" in user["content"]
+    assert "INGREDIENT LIST (from the post's text):\n- rice" in user["content"]
     assert "ON-SCREEN TEXT" not in user["content"]
 
 
@@ -192,7 +192,7 @@ def test_silent_video_gets_steps_with_times(monkeypatch, tmp_path):
     conn = connect(":memory:")
     result = ingest_url("https://www.instagram.com/p/V1/", conn, cfg(tmp_path))
 
-    assert fake.visual_calls[0]["known_ingredients"] == ["rice", "egg", "scallion"]
+    assert fake.visual_calls[0]["known_ingredients"] == ["2 cup rice", "2 egg", "1 scallion"]
     assert fake.visual_calls[0]["description"] == "rice, eggs"
     stored = get_recipe(conn, result.recipe_id)
     assert stored["steps"] == ["Scramble the eggs.", "Fry the rice with the eggs."]
@@ -293,7 +293,7 @@ def test_steps_from_video_keeps_ingredients(monkeypatch, tmp_path):
     ingest.steps_from_video(conn, silent, cfg(tmp_path))
 
     assert seen[0][0] == "https://www.instagram.com/p/S1/"
-    assert seen[0][1]["known_ingredients"] == ["rice"]
+    assert seen[0][1]["known_ingredients"] == ["2 cup rice"]
     after = get_recipe(conn, silent)
     assert after["steps"] == ["Scramble the eggs.", "Fry the rice with the eggs."]
     assert after["step_times"] == [0.0, 5.0]
@@ -349,3 +349,53 @@ def test_show_prints_step_start_times(monkeypatch, tmp_path, capsys):
     main.main(["show", str(rid)])
     out = capsys.readouterr().out
     assert "1. [0:00] Rinse the rice." in out and "2. [1:12] Fry it." in out
+
+
+def test_ingredient_line():
+    from pipeline.parser import ingredient_line
+    assert ingredient_line("granulated sugar", 80.0, "g") == "80 g granulated sugar"
+    assert ingredient_line("baking soda", 0.75, "tsp") == "0.75 tsp baking soda"
+    assert ingredient_line("egg", 1.0) == "1 egg"
+    assert ingredient_line("flaky sea salt") == "flaky sea salt"
+
+
+def test_visual_prompt_rules():
+    prompt = parser.VISUAL_PROMPT
+    assert "gathering ingredients or equipment" in prompt
+    assert '"Add 80 g granulated sugar."' in prompt
+    assert "used in two or more steps" in prompt
+
+
+def test_refresh_reads_video_steps_again_but_never_written_ones(monkeypatch, tmp_path):
+    conn = connect(":memory:")
+    from_video = save_recipe(conn, source_url="https://www.instagram.com/p/R1/", title="Rice",
+                             ingredients=[{"name": "rice"}], steps=["Gather the ingredients."], step_times=[0.0])
+    written = save_recipe(conn, source_url="https://www.instagram.com/p/R2/", title="Toast",
+                          ingredients=[{"name": "bread"}], steps=["Toast the bread."])
+    monkeypatch.setattr(ingest, "read_video_steps", lambda video, cfg, **kw: VISUAL)
+
+    with pytest.raises(ValueError, match="already has steps"):
+        ingest.steps_from_video(conn, from_video, cfg(tmp_path))
+    ingest.steps_from_video(conn, from_video, cfg(tmp_path), refresh=True)
+    assert get_recipe(conn, from_video)["steps"] == ["Scramble the eggs.", "Fry the rice with the eggs."]
+
+    with pytest.raises(ValueError, match="already has steps"):
+        ingest.steps_from_video(conn, written, cfg(tmp_path), refresh=True)
+    assert get_recipe(conn, written)["steps"] == ["Toast the bread."]
+
+
+def test_video_steps_refresh_picks_recipes_with_video_steps(monkeypatch, tmp_path, capsys):
+    import main
+
+    path = tmp_path / "r.db"
+    conn = connect(path)
+    save_recipe(conn, source_url="https://www.instagram.com/p/R1/", title="Rice", ingredients=[{"name": "rice"}],
+                steps=["Gather the ingredients."], step_times=[0.0])
+    save_recipe(conn, source_url="https://www.instagram.com/p/R2/", title="Toast", ingredients=[{"name": "bread"}],
+                steps=["Toast the bread."])
+    conn.close()
+    monkeypatch.setattr(main, "settings", dataclasses.replace(main.settings, db_path=path, downloads_dir=tmp_path))
+    read = []
+    monkeypatch.setattr(ingest, "read_video_steps", lambda video, cfg, **kw: read.append(video.url) or VISUAL)
+    assert main.main(["video-steps", "--refresh"]) == 0
+    assert read == ["https://www.instagram.com/p/R1/"]

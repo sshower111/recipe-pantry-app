@@ -389,11 +389,29 @@ Rules:
 - Describe only what the frames (or the post's text) actually show. Never invent steps,
   ingredients, amounts, temperatures or times. If an amount, temperature or time is written
   on screen or in the text, keep it exactly.
-- Several frames of the same action are one step; merge tiny actions. At most 20 steps.
-- When the post's text names ingredients, use those names for what you see.
-- Ignore plating-only shots, tasting, logos, usernames and calls to action.
+- Several frames of the same action are one step. At most 20 steps.
+- Only real cooking steps. Leave out setup and handling: gathering ingredients or equipment,
+  opening packets or jars, unwrapping, weighing out, washing up, serving suggestions ("serve
+  with a glass of milk"), plating-only shots and tasting.
+- Fold simple prep into the step that uses it: not "Chop the chocolate into chunks." then
+  "Fold in the chocolate.", but "Fold in the chopped dark chocolate.". Merge ingredients
+  added one after another into one step ("Add the flour, baking soda and salt.").
+- Say what is mixed, not "combine the ingredients" ("Beat the butter and both sugars until
+  fluffy.").
+- When an INGREDIENT LIST is given, use its names, and write the amount when an ingredient
+  goes in all at once: "Add 80 g granulated sugar.", "Add 0.75 tsp baking soda.". If an
+  ingredient is used in two or more steps (part of it now, the rest later), give no amount
+  for it in any step ("Add half of the butter.", "Add the remaining butter."). Never write
+  an amount the list or the frames don't give.
+- Ignore logos, usernames and calls to action.
 - If the frames show no cooking, return an empty "steps" list.
 """
+
+
+def ingredient_line(name: str, amount: float | None = None, unit: str | None = None) -> str:
+    """"80 g granulated sugar", "1 egg", "flaky sea salt": an ingredient as the model reads it."""
+    parts = [f"{amount:g}" if amount is not None else "", unit or "", name]
+    return " ".join(p for p in parts if p)
 
 
 def build_visual_messages(
@@ -417,7 +435,7 @@ def build_visual_messages(
     if on_screen.strip():
         user += f"ON-SCREEN TEXT (OCR of video frames):\n{on_screen.strip()[: max_chars // 2]}\n\n"
     if known_ingredients:
-        user += "INGREDIENTS ALREADY FOUND IN THE TEXT:\n" + "\n".join(f"- {n}" for n in known_ingredients) + "\n\n"
+        user += "INGREDIENT LIST (from the post's text):\n" + "\n".join(f"- {n}" for n in known_ingredients) + "\n\n"
     user += f"FRAMES ({len(frames)}, attached in this order):\n{labels}"
     images = [base64.b64encode(data).decode("ascii") for _, data in frames]
     return [{"role": "system", "content": VISUAL_PROMPT}, {"role": "user", "content": user, "images": images}]

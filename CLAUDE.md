@@ -71,7 +71,7 @@ python main.py show <id> [--json]
 python main.py import-page <id> [--url <recipe page>] [--file saved.html|list.txt]   # creator's blog
 python main.py reparse <id> [<id> ...] | --missing-steps   # re-run the model on saved text
 python main.py shorten-steps [<id> ...] [--refresh]   # island step versions, no reparse
-python main.py video-steps [<id> ...] [--todo] [--dry-run]   # steps from frames of silent recipes
+python main.py video-steps [<id> ...] [--todo] [--refresh] [--dry-run]   # steps from frames of silent recipes
 python main.py renormalize [--dry-run]   # after normalizer/ALIASES edits
 python main.py thumbnails [--refresh]    # save video thumbnails to data/thumbnails/
 uvicorn api.app:app --host 0.0.0.0 --port 8000   # API for the iPhone app (on the PC)
@@ -131,8 +131,14 @@ uvicorn api.app:app --host 0.0.0.0 --port 8000   # API for the iPhone app (on th
   (`ingest.steps_from_video`: video download only, stored ingredients kept): by default every
   ready recipe with no steps whose saved transcript is silent; `--todo` adds needs_recipe
   posts (they turn ready if the frames give ingredient names); explicit ids skip the silence
-  check. Verified on the PC (2026-11-04, qwen3.5:9b reads images): 5 stored recipes, 6-20
-  keyframes each, 3-14 steps; step quality not yet reviewed. The API doesn't expose
+  check; `--refresh` reads again the steps that have start times (never written steps).
+  The model gets the stored ingredient list with amounts (`parser.ingredient_line`). Prompt
+  rules from the user's review of recipe 54 (2026-11-05): no setup/handling steps (gathering,
+  opening packets, serving suggestions), simple prep folded into the step that uses it
+  ("Fold in the chopped dark chocolate"), amounts written when an ingredient goes in all at
+  once ("Add 80 g granulated sugar"), none for an ingredient split across steps.
+  Verified on the PC (2026-11-04, qwen3.5:9b reads images): 5 stored recipes, 6-20
+  keyframes each, 3-14 steps. The API doesn't expose
   `start_seconds` yet.
 - **Recipe pages** (`RECIPE_RECIPE_PAGES`, default on). When a parse looks incomplete and the
   caption links to a non-social page (`urls.recipe_link`), `webrecipe.fetch_recipe_page` reads its

@@ -16,7 +16,8 @@ from config import Settings, settings as default_settings
 from db import find_recipe_id, get_recipe, save_recipe, set_short_steps, set_status_note
 from pipeline.downloader import MediaAssets, download_media, download_video
 from pipeline.parser import (
-    Ingredient, OllamaError, ParsedRecipe, VisualRecipe, parse_recipe, parse_visual_recipe, shorten_steps,
+    Ingredient, OllamaError, ParsedRecipe, VisualRecipe, ingredient_line, parse_recipe, parse_visual_recipe,
+    shorten_steps,
 )
 from pipeline.thumbnails import save_thumbnail
 from pipeline.urls import canonical_url, classify_missing_recipe, recipe_link
@@ -331,7 +332,7 @@ def ingest_url(
         if cfg.visual_mode == "auto" and silent and (recipe is None or not recipe.steps or looks_incomplete(recipe)):
             visual = read_video_steps(
                 video, cfg, title=media.title, description=media.description, on_screen=inputs.on_screen or "",
-                known_ingredients=[i.name for i in recipe.ingredients] if recipe else [],
+                known_ingredients=[ingredient_line(i.name, i.amount, i.unit) for i in recipe.ingredients] if recipe else [],
             )
             if visual is not None and visual.steps:
                 had_ingredients = bool(recipe and recipe.ingredients)
@@ -527,19 +528,31 @@ def stored_is_silent(stored: dict, cfg: Settings = default_settings) -> bool:
     return is_silent(stored["transcript"] or "", stored["transcript_source"] or "none", cfg.visual_min_words)
 
 
-def steps_from_video(conn: sqlite3.Connection, recipe_id: int, cfg: Settings = default_settings) -> IngestResult:
+def has_video_steps(stored: dict) -> bool:
+    """Whether a stored recipe's steps were read from its video (they have start times)."""
+    return any(t is not None for t in stored["step_times"])
+
+
+def steps_from_video(
+    conn: sqlite3.Connection, recipe_id: int, cfg: Settings = default_settings, *, refresh: bool = False
+) -> IngestResult:
     """Add steps read from a stored recipe's video frames (the visual fallback, for recipes
     saved before it existed). Downloads the video only: no Whisper, no text parse; stored
-    ingredients are kept, and only filled from the frames when there are none. Raises
-    ValueError when the frames give nothing new."""
+    ingredients are kept, and only filled from the frames when there are none. With
+    ``refresh``, steps read from the video before are read again (written steps never are).
+    Raises ValueError when the frames give nothing new."""
     stored = get_recipe(conn, recipe_id)
     if stored is None:
         raise ValueError(f"No recipe with id {recipe_id}")
+    if refresh and has_video_steps(stored):
+        stored["steps"], stored["step_times"] = [], []
     video = VideoFile(stored["source_url"], cfg)
     try:
         visual = read_video_steps(
             video, cfg, title=stored["title"], description=stored["description"] or "",
-            on_screen=stored["on_screen_text"] or "", known_ingredients=[i["raw_name"] for i in stored["ingredients"]],
+            on_screen=stored["on_screen_text"] or "", known_ingredients=[
+                ingredient_line(i["raw_name"], i["amount"], i["unit"]) for i in stored["ingredients"]
+            ],
         )
     finally:
         video.close()

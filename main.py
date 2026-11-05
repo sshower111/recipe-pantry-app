@@ -8,7 +8,7 @@
     python main.py show <recipe_id>
     python main.py import-page <recipe_id> [--url <page>] [--file saved.html|ingredients.txt]
     python main.py shorten-steps [<recipe_id> ...] [--refresh]
-    python main.py video-steps [<recipe_id> ...] [--todo] [--dry-run]
+    python main.py video-steps [<recipe_id> ...] [--todo] [--refresh] [--dry-run]
 """
 
 from __future__ import annotations
@@ -274,11 +274,14 @@ def cmd_video_steps(args: argparse.Namespace) -> int:
     """Read steps from the video frames of stored silent / music-only recipes that have
     none: the given ids, else every ready recipe without steps whose saved transcript has
     (almost) no speech (with --todo, the needs-recipe list too). Keeps going past failures."""
-    from pipeline.ingest import steps_from_video, stored_is_silent
+    from pipeline.ingest import has_video_steps, steps_from_video, stored_is_silent
 
     conn = open_db()
     ids = list(dict.fromkeys(args.recipe_ids))
-    if not ids:
+    if not ids and args.refresh:
+        ids = [r["id"] for r in list_recipes(conn, None) if r["step_count"] and has_video_steps(get_recipe(conn, r["id"]))]
+        print(f"{len(ids)} recipe{'s' * (len(ids) != 1)} with steps read from video, to read again")
+    elif not ids:
         statuses = ["ready", "needs_recipe"] if args.todo else ["ready"]
         no_steps = [r for r in list_recipes(conn, statuses) if not r["step_count"]]
         silent = [r for r in no_steps if stored_is_silent(get_recipe(conn, r["id"]), settings)]
@@ -302,7 +305,7 @@ def cmd_video_steps(args: argparse.Namespace) -> int:
     failures = 0
     for n, recipe_id in enumerate(ids, 1):
         try:
-            result = steps_from_video(conn, recipe_id, settings)
+            result = steps_from_video(conn, recipe_id, settings, refresh=args.refresh)
         except ValueError as exc:
             print(f"FAILED [{recipe_id}] {exc}", file=sys.stderr)
             failures += 1
@@ -498,6 +501,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="recipes to read (default: every ready recipe with no steps and no speech)")
     p.add_argument("--todo", action="store_true",
                    help="also the needs-recipe list (frames can give ingredient names, without amounts)")
+    p.add_argument("--refresh", action="store_true",
+                   help="read again the steps read from video before (default: all of them); written steps stay")
     p.add_argument("--dry-run", action="store_true", help="list the recipes without downloading anything")
     p.set_defaults(func=cmd_video_steps)
 
