@@ -89,6 +89,9 @@ struct CookbookView: View {
         NavigationStack(path: $path) {
             // A List (not a ScrollView) for its swipe actions; rows are styled to look the same.
             List {
+                if store.isRefreshing {
+                    RefreshingChefView().feedRow(top: 4, bottom: 4)
+                }
                 VStack(alignment: .leading, spacing: 0) {
                     header
                     searchField.padding(.top, 32)
@@ -111,8 +114,7 @@ struct CookbookView: View {
             .scrollDismissesKeyboard(.immediately)
             .background(Color.cream)
             .refreshable {
-                await store.load()
-                await searchPantry()
+                await store.refresh { await searchPantry() }
             }
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: Int.self) { RecipeDetailView(recipeId: $0) }
@@ -343,15 +345,18 @@ struct CookbookView: View {
                   "No ingredient list in that post. If the recipe is coming, save it for later.")
         }
         return HStack(alignment: .top, spacing: 12) {
+            // The chef cooks while the PC downloads and parses the video; the error pose if it failed.
             Group {
                 if job.isActive {
-                    ProgressView().tint(Color.terracotta)
+                    AnimatedChefView(.loading, size: 44)
+                } else if job.status == "failed" {
+                    AnimatedChefView(.error, size: 44)
                 } else {
-                    Image(systemName: job.status == "failed" ? "exclamationmark.triangle" : "checkmark.circle")
+                    Image(systemName: "checkmark.circle")
                         .foregroundStyle(Color.terracotta)
                 }
             }
-            .frame(width: 22, height: 22)
+            .frame(width: 44, height: 44)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.subheadline.weight(.medium))
@@ -408,6 +413,10 @@ struct CookbookView: View {
                      ? "Searching by ingredient needs the PC, which is out of reach right now."
                      : "Couldn't search by ingredient (\(pantryError)).") { Task { await searchPantry() } }
                 .feedRow(top: 16)
+        } else if shown.isEmpty, filter == .favorites, query.isEmpty, picks.isEmpty {
+            EmptyFavoritesView()
+                .padding(.top, 24)
+                .feedRow()
         } else if shown.isEmpty {
             Text(emptyMessage)
                 .foregroundStyle(Color.muted)

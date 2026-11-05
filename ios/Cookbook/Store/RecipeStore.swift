@@ -27,6 +27,8 @@ final class RecipeStore {
     /// Set to check the jobs again right away instead of after the usual wait.
     private var checkJobsNow = false
     private var savedAt: Date?
+    /// A pull-to-refresh is running (the feed shows the refreshing chef).
+    private(set) var isRefreshing = false
 
     init() {
         if let list = OfflineStore.loadList() {
@@ -58,6 +60,15 @@ final class RecipeStore {
                 self.error = error.localizedDescription
             }
         }
+    }
+
+    /// Pull-to-refresh: `load`, with `isRefreshing` set meanwhile. `also` runs inside the same
+    /// window (the feed's pantry re-rank).
+    func refresh(also: () async -> Void = {}) async {
+        isRefreshing = true
+        defer { isRefreshing = false }
+        await load()
+        await also()
     }
 
     /// Follows shared posts while any is being added: checks every 8 s, and reloads the feed

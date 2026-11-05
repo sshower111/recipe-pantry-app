@@ -179,9 +179,7 @@ struct StepCard: View {
 
     private var finished: some View {
         VStack(spacing: 8) {
-            Image(systemName: "party.popper")
-                .font(.system(size: 30, weight: .light))
-                .foregroundStyle(Color.terracotta)
+            AnimatedChefView(.success, size: 72)
             Text("All done. Enjoy!")
                 .font(.serifTitle(30))
                 .foregroundStyle(Color.ink)

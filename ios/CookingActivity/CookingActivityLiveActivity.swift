@@ -4,13 +4,14 @@
 //
 //  The cooking-step Live Activity, designed to Apple's Live Activities guidelines
 //  (developer.apple.com/design/human-interface-guidelines/live-activities) in the app's own
-//  look: cream text, terracotta accents, Apple's SF Pro throughout, and the cook as a logo mark
-//  without a container, in the same leading spot in every presentation.
+//  look: cream text, terracotta accents, Apple's SF Pro throughout, and the pixel chef
+//  (Shared/ChefMascot.swift) as the logo mark, without a container, in the leading spot.
+//  Live Activities can't run a frame timer, so the chef is a still: one toss pose per step.
 //
-//  - Compact: the cook | a progress ring with the step number (or the step timer). Both fit
-//    the 28 pt circle the guidelines ask for when the island is narrow (landscape).
-//  - Minimal: the ring (live progress, not just a logo), or the timer when one runs.
-//  - Expanded and Lock Screen share one layout: cook + "Step 2/4" with a segment bar, the
+//  - Compact: the chef's head (chef_head_compact) | a progress ring with the step number (or
+//    the step timer). Both fit the 28 pt circle the guidelines ask for (landscape).
+//  - Minimal: the chef at the wok (chef_wok_minimal), or the timer when one runs.
+//  - Expanded and Lock Screen share one layout: chef + "Step 2/4" with a segment bar, the
 //    instruction, then the ingredients and a single ‹ | › control (plus a quiet ✕).
 //  - Lock Screen follows the phone's appearance (cream / warm dark, like the app), with the
 //    standard 14 pt margins; the island is always black (the system's, not customizable).
@@ -39,7 +40,6 @@ private enum Palette {
     static let sand = Color(hex: 0xE6E2DD)
     static let terracotta = Color(hex: 0xC86D51)
     static let warmDark = Color(hex: 0x1F1A17)         // Lock Screen background in Dark Mode
-    static let cookYellow = Color(red: 0.96, green: 0.78, blue: 0.26)
 }
 
 /// Colors for one surface: the black island, or the Lock Screen in light or dark.
@@ -47,35 +47,34 @@ private struct Look {
     var text: Color
     var secondary: Color
     var accent: Color
-    var cook: Color
     var track: Color          // empty part of the progress ring / bar
     var quiet: Color          // the ✕ button's fill
 
     static let island = Look(text: Palette.cream, secondary: Palette.cream.opacity(0.6),
-                             accent: Palette.terracotta, cook: Palette.cookYellow,
+                             accent: Palette.terracotta,
                              track: Palette.cream.opacity(0.2), quiet: Palette.cream.opacity(0.14))
     static let lockLight = Look(text: Palette.ink, secondary: Palette.muted,
-                                accent: Palette.terracotta, cook: Palette.terracotta,
+                                accent: Palette.terracotta,
                                 track: Palette.sand, quiet: Palette.sand)
     static let lockDark = Look(text: Palette.cream, secondary: Palette.cream.opacity(0.6),
-                               accent: Palette.terracotta, cook: Palette.cookYellow,
+                               accent: Palette.terracotta,
                                track: Palette.cream.opacity(0.18), quiet: Palette.cream.opacity(0.14))
 }
 
 struct CookingActivityLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: CookingActivityAttributes.self) { context in
-            LockScreenView(context: context)
+            LockScreenLiveActivityView(context: context)
                 .widgetURL(recipeURL(context))
         } dynamicIsland: { context in
             let state = context.state
             let look = Look.island
             return DynamicIsland {
-                // Expanded: wrapped close around the camera, cook on the leading side as in compact.
+                // Expanded: wrapped close around the camera, the chef on the leading side.
                 DynamicIslandExpandedRegion(.leading) {
                     // Kept small: the expanded island is cropped past ~160 pt, and the
                     // instruction needs the room while a video plays.
-                    CookFrame(size: 30, step: state.currentStepIndex, color: look.cook)
+                    ChefStill(animation: .toss, step: state.currentStepIndex, size: 34)
                         .padding(.leading, 6)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
@@ -97,7 +96,7 @@ struct CookingActivityLiveActivity: Widget {
                     .padding(.top, 2)
                 }
             } compactLeading: {
-                CookFrame(size: 24, step: state.currentStepIndex, color: look.cook)
+                ChefStill(animation: .headCompact, step: state.currentStepIndex, size: 24)
             } compactTrailing: {
                 if let end = state.timerEndsAt {
                     // Counts down by itself; snug against the camera, no extra padding.
@@ -108,13 +107,14 @@ struct CookingActivityLiveActivity: Widget {
                     StepRing(state: state, look: look, size: 24)
                 }
             } minimal: {
-                // Live information, like the Timer app: the time left, else the progress ring.
+                // The time left while a step timer runs (live information, like the Timer
+                // app), else the chef at the wok.
                 if let end = state.timerEndsAt {
                     Countdown(end: end, color: look.accent)
                         .font(.system(size: 12, weight: .semibold))
                         .frame(maxWidth: 40)
                 } else {
-                    StepRing(state: state, look: look, size: 24)
+                    ChefStill(animation: .wokMinimal, step: state.currentStepIndex, size: 24)
                 }
             }
             .widgetURL(recipeURL(context))
@@ -127,8 +127,9 @@ struct CookingActivityLiveActivity: Widget {
     }
 }
 
-/// The Lock Screen card: the expanded layout, on the app's cream (or warm dark) background.
-private struct LockScreenView: View {
+/// The Lock Screen banner: the chef mid-toss beside the step, then the expanded layout's body,
+/// on the app's cream (or warm dark) background.
+private struct LockScreenLiveActivityView: View {
     let context: ActivityViewContext<CookingActivityAttributes>
     @Environment(\.colorScheme) private var colorScheme
 
@@ -137,7 +138,7 @@ private struct LockScreenView: View {
         let look = dark ? Look.lockDark : Look.lockLight
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 10) {
-                CookFrame(size: 36, step: context.state.currentStepIndex, color: look.cook)
+                ChefStill(animation: .toss, step: context.state.currentStepIndex, size: 44)
                 StepHeader(state: context.state, look: look, alignment: .leading)
                 Spacer(minLength: 0)
             }
@@ -343,26 +344,6 @@ private struct IngredientLine: View {
         return Text(names.joined(separator: " · "))
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
-    }
-}
-
-/// The cook: one pose of the wok toss per step (`Fonts/CookFlip.ttf`, whose digits 0-9 are the
-/// frames, built by `ios/tools/make_flipbook_font.py` from `ios/Art/cook-frames`). A per-second
-/// flipbook through the self-updating `Text(timerInterval:)` doesn't work: iOS draws timer
-/// text itself and ignores the custom font, so only static text shows the frames.
-private struct CookFrame: View {
-    let size: CGFloat
-    /// The step index; neighbouring steps get poses three frames apart, so each change shows.
-    var step = 0
-    var color = Palette.cookYellow
-
-    var body: some View {
-        Text("\((step * 3) % 10)")
-            .font(.custom("CookFlip", size: size))
-            .foregroundStyle(color)
-            .frame(width: size, height: size)
-            .contentTransition(.opacity)
-            .accessibilityHidden(true)
     }
 }
 
